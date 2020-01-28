@@ -7,6 +7,8 @@ extern "C" {
 
 #define DROP 			0
 #define ENQUE 			1
+#define MAX_PROB		0xffffffff	//2^32
+#define AB_SCALE		5
 //#define TARGET_QDELAY	15000		//in microseconds
 //#define MAX_BURST 	150000		//in microseconds
 //#define T_UPDATE		15000		//in milliseconds
@@ -56,45 +58,49 @@ __rte_unused static void rte_pie_cal_drop_prob(
 	struct rte_pie_config *pie_config = (struct rte_pie_config *) arg;
 	struct rte_pie_params *params = pie_config->pie_params;
 	struct rte_pie *pie = pie_config->pie;
+	uint64_t cur_qdelay = pie->cur_qdelay;			//in hz
+	uint64_t old_qdelay = pie->old_qdelay;			//in hz
+	uint64_t target_delay = params->target_delay;	//in microseconds
 
-	uint64_t p = params->alpha * (pie->cur_qdelay- params->target_delay) + \
-			params->beta * (pie->cur_qdelay - pie->old_qdelay);
+	uint64_t p = (params->alpha * (pie->cur_qdelay- params->target_delay))>>AB_SCALE + \
+			(params->beta * (pie->cur_qdelay - pie->old_qdelay))>>AB_SCALE;
 
 	//How alpha and beta are set?
-	if (pie->drop_prob < 0.000001) {
+	if 		  (pie->drop_prob < 4294) {				//2^32*0.000001
 		p /= 2048;
-	} else if (pie->drop_prob < 0.00001) {
+	} else if (pie->drop_prob < 42949) {		//2^32*0.00001
 		p /= 512;
-	} else if (pie->drop_prob < 0.0001) {
+	} else if (pie->drop_prob < 429496) {		//2^32*0.0001
 		p /= 128;
-	} else if (pie->drop_prob < 0.001) {
+	} else if (pie->drop_prob < 4294967) {		//2^32*0.001
 		p /= 32;
-	} else if (pie->drop_prob < 0.01) {
+	} else if (pie->drop_prob < 42949672) {		//2^32*0.01
 		p /= 8;
-	} else if (pie->drop_prob < 0.1) {
+	} else if (pie->drop_prob < 429496729) {	//2^32*0.1
 		p /= 2;
 	} else {
 		p = p;
 	}
 
 	//Cap Drop Adjustment
-	if (pie->drop_prob >= 0.1 && p > 0.02) {
-		p = 0.02;
+	if (pie->drop_prob >= 429496729 /*0.1*/ && p > 858993459/*0.02*/) {
+		p = 858993459;	//0.02
 	}
 	pie->drop_prob += p;
 
 	//Exponentially decay drop prob when congestion goes away
 	if (pie->cur_qdelay < params->target_delay/2 && pie->old_qdelay < params->target_delay/2) {
-		pie->drop_prob *= 0.98;        //1 - 1/64 is sufficient
+		//pie->drop_prob *= 0.98;        //1 - 1/64 is sufficient
+		pie->drop_prob -= (MAX_PROB>>6);
 	}
 
 	//Bound drop probability
 /*
-	if (pie->drop_prob < 0ull)
-		pie->drop_prob = 0ull;
-	if (pie->drop_prob > 1ull)
-		pie->drop_prob = 1ull;
+	if (pie->drop_prob < 0u)
+		pie->drop_prob = 0u;
 */
+	if (pie->drop_prob > MAX_PROB)
+		pie->drop_prob = MAX_PROB;
 
 	//Burst tolerance
 	pie->burst_allowance = max(0, pie->burst_allowance - params->t_update);
@@ -104,12 +110,9 @@ __rte_unused static void rte_pie_cal_drop_prob(
 
 //Called on each packet departure
 static inline void rte_pie_deque(struct rte_pie_config *pie_config, uint64_t timestamp) {
-	uint64_t now = rte_get_tsc_cycles();		//get the total number of cycles since boot.
-	//uint64_t cycles_in_second = rte_get_timer_hz(); //get the number of cycles in one second
-	//now /= cycles_in_second / 1000;	// get the timestamp in milliseconds.
+	uint64_t now = rte_get_tsc_cycles();			//get the total number of cycles since boot.
 	pie_config->pie->cur_qdelay = now - timestamp;	//current queue delay in milliseconds.
 }
-
 
 #ifdef __cplusplus
 }
@@ -117,3 +120,13 @@ static inline void rte_pie_deque(struct rte_pie_config *pie_config, uint64_t tim
 
 #endif /* __RTE_PIE_H_INCLUDED__ */
 
+/*
+ * //Called on each packet departure
+ *static inline void rte_pie_deque(struct rte_pie_config *pie_config, uint64_t timestamp) {
+ *		uint64_t now = rte_get_tsc_cycles();		//get the total number of cycles since boot.
+ *		//uint64_t cycles_in_second = rte_get_timer_hz(); //get the number of cycles in one second
+ *		//now /= cycles_in_second / 1000;	// get the timestamp in milliseconds.
+ *		pie_config->pie->cur_qdelay = now - timestamp;	//current queue delay in milliseconds.
+ * }
+ *
+ */
