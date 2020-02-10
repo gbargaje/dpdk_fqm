@@ -19,7 +19,14 @@ extern "C" {
 #include <rte_random.h>
 #include <rte_timer.h>
 
-struct rte_pie_params {
+struct rte_pie_params{
+	uint32_t target_delay;		//Target Queue Delay
+	uint32_t t_update;			//drop rate calculation period
+	uint32_t mean_pkt_size;		//Mean packet size in number of packets.
+	uint32_t max_burst;
+};
+
+struct rte_pie_config {
 	uint32_t target_delay;		//Target Queue Delay
 	uint32_t t_update;			//drop rate calculation period
 	uint32_t alpha;
@@ -36,15 +43,15 @@ struct rte_pie {
 	uint64_t accu_prob;			//Accumulated drop rate.. Derandomization.
 };
 
-struct rte_pie_config {
-	struct rte_pie_params *pie_params;
+struct rte_pie_all {
+	struct rte_pie_config *pie_config;
 	struct rte_pie *pie;
 };
 
-void rte_pie_params_init(struct rte_pie_params*);
-void rte_pie_init(struct rte_pie *);
-int rte_pie_drop(struct rte_pie_config*, uint32_t);
-int rte_pie_enque(struct rte_pie_config *, uint32_t);
+int rte_pie_config_init(struct rte_pie_config*, uint32_t, uint32_t, uint32_t, uint32_t);
+int rte_pie_data_init(struct rte_pie *);
+int rte_pie_drop(struct rte_pie_config *, struct rte_pie *, uint32_t);
+int rte_pie_enqueue(struct rte_pie_config *, struct rte_pie *, uint32_t);
 
 static inline uint64_t max(uint64_t a, uint64_t b)
 {
@@ -55,15 +62,15 @@ static inline uint64_t max(uint64_t a, uint64_t b)
 __rte_unused static void rte_pie_cal_drop_prob(
 		__attribute__((unused)) struct rte_timer *tim,	void *arg)
 {
-	struct rte_pie_config *pie_config = (struct rte_pie_config *) arg;
-	struct rte_pie_params *params = pie_config->pie_params;
-	struct rte_pie *pie = pie_config->pie;
+	struct rte_pie_all *pie_all = (struct rte_pie_all *) arg;
+	struct rte_pie_config *config = pie_all->pie_config;
+	struct rte_pie *pie = pie_all->pie;
 	uint64_t cur_qdelay = pie->cur_qdelay;			//in hz
 	uint64_t old_qdelay = pie->old_qdelay;			//in hz
-	uint64_t target_delay = params->target_delay;	//in microseconds
+	uint64_t target_delay = config->target_delay;	//in microseconds
 
-	uint64_t p = (params->alpha * (pie->cur_qdelay- params->target_delay))>>AB_SCALE + \
-			(params->beta * (pie->cur_qdelay - pie->old_qdelay))>>AB_SCALE;
+	uint64_t p = ((config->alpha * (cur_qdelay- target_delay)) >> AB_SCALE) +
+			((config->beta * (cur_qdelay - old_qdelay)) >> AB_SCALE);
 
 	//How alpha and beta are set?
 	if 		  (pie->drop_prob < 4294) {				//2^32*0.000001
@@ -89,29 +96,28 @@ __rte_unused static void rte_pie_cal_drop_prob(
 	pie->drop_prob += p;
 
 	//Exponentially decay drop prob when congestion goes away
-	if (pie->cur_qdelay < params->target_delay/2 && pie->old_qdelay < params->target_delay/2) {
+	if (cur_qdelay < target_delay/2 && old_qdelay < target_delay/2) {
 		//pie->drop_prob *= 0.98;        //1 - 1/64 is sufficient
 		pie->drop_prob -= (MAX_PROB>>6);
 	}
 
-	//Bound drop probability
-/*
+/*	//Bound drop probability
 	if (pie->drop_prob < 0u)
-		pie->drop_prob = 0u;
-*/
+		pie->drop_prob = 0u; */
+
 	if (pie->drop_prob > MAX_PROB)
 		pie->drop_prob = MAX_PROB;
 
 	//Burst tolerance
-	pie->burst_allowance = max(0, pie->burst_allowance - params->t_update);
-	pie->old_qdelay = pie->cur_qdelay;
+	pie->burst_allowance = max(0, pie->burst_allowance - config->t_update);
+	pie->old_qdelay = cur_qdelay;
 }
 
 
 //Called on each packet departure
-static inline void rte_pie_deque(struct rte_pie_config *pie_config, uint64_t timestamp) {
+static inline void rte_pie_deque(struct rte_pie_all *pie_all, uint64_t timestamp) {
 	uint64_t now = rte_get_tsc_cycles();			//get the total number of cycles since boot.
-	pie_config->pie->cur_qdelay = now - timestamp;	//current queue delay in milliseconds.
+	pie_all->pie->cur_qdelay = now - timestamp;		//current queue delay in milliseconds.
 }
 
 #ifdef __cplusplus
@@ -119,14 +125,3 @@ static inline void rte_pie_deque(struct rte_pie_config *pie_config, uint64_t tim
 #endif
 
 #endif /* __RTE_PIE_H_INCLUDED__ */
-
-/*
- * //Called on each packet departure
- *static inline void rte_pie_deque(struct rte_pie_config *pie_config, uint64_t timestamp) {
- *		uint64_t now = rte_get_tsc_cycles();		//get the total number of cycles since boot.
- *		//uint64_t cycles_in_second = rte_get_timer_hz(); //get the number of cycles in one second
- *		//now /= cycles_in_second / 1000;	// get the timestamp in milliseconds.
- *		pie_config->pie->cur_qdelay = now - timestamp;	//current queue delay in milliseconds.
- * }
- *
- */
