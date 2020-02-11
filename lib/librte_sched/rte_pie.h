@@ -85,9 +85,9 @@ __rte_unused static void rte_pie_cal_drop_prob(
 		p /= 8;
 	} else if (pie->drop_prob < 429496729) {	//2^32*0.1
 		p /= 2;
-	} else {
-		p = p;
-	}
+	}	//else {
+//		p = p;
+//	}
 
 	//Cap Drop Adjustment
 	if (pie->drop_prob >= 429496729 /*0.1*/ && p > 858993459/*0.02*/) {
@@ -115,9 +115,9 @@ __rte_unused static void rte_pie_cal_drop_prob(
 
 
 //Called on each packet departure
-static inline void rte_pie_deque(struct rte_pie_all *pie_all, uint64_t timestamp) {
+static inline void rte_pie_deque(struct rte_pie *pie, uint64_t timestamp) {
 	uint64_t now = rte_get_tsc_cycles();			//get the total number of cycles since boot.
-	pie_all->pie->cur_qdelay = now - timestamp;		//current queue delay in milliseconds.
+	pie->cur_qdelay = now - timestamp;		//current queue delay in milliseconds.
 }
 
 #ifdef __cplusplus
