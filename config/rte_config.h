@@ -90,6 +90,7 @@
 
 /* rte_sched defines */
 #undef RTE_SCHED_RED
+#undef RTE_SCHED_PIE
 #undef RTE_SCHED_COLLECT_STATS
 #undef RTE_SCHED_SUBPORT_TC_OV
 #define RTE_SCHED_PORT_N_GRINDERS 8
