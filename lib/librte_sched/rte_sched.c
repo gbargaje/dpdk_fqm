@@ -91,6 +91,8 @@ struct rte_sched_queue_extra {
 	struct rte_sched_queue_stats stats;
 #ifdef RTE_SCHED_RED
 	struct rte_red red;
+#elif defined RTE_SCHED_PIE
+	struct rte_pie pie;
 #endif
 };
 
@@ -177,6 +179,8 @@ struct rte_sched_subport {
 
 #ifdef RTE_SCHED_RED
 	struct rte_red_config red_config[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE][RTE_COLORS];
+#elif defined RTE_SCHED_PIE
+	struct rte_pie_config pie_config[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE][RTE_COLORS];
 #endif
 
 	/* Scheduling loop detection */
@@ -1084,6 +1088,28 @@ rte_sched_subport_config(struct rte_sched_port *port,
 			}
 		}
 	}
+#elif defined RTE_SCHED_PIE
+	for (i = 0; i < RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++) {
+			uint32_t j;
+			for (j = 0; j < RTE_COLORS; j++) {
+				/* if TARGET_DELAY is zero, then PIE is disabled */
+				if (params->pie_params[i][j].target_delay == 0) {
+					continue;
+				}
+
+				if (rte_pie_config_init(&s->pie_config[i][j],
+					params->pie_params[i][j].target_delay,
+					params->pie_params[i][j].t_update,
+					params->pie_params[i][j].mean_pkt_size,
+					params->pie_params[i][j].max_burst) != 0) {
+					rte_sched_free_memory(port, n_subports);
+
+					RTE_LOG(NOTICE, SCHED,
+					"%s: PIE configuration init fails\n", __func__);
+					return -EINVAL;
+				}
+			}
+		}
 #endif
 
 	/* Scheduling loop detection */
@@ -1510,7 +1536,7 @@ rte_sched_port_update_subport_stats(struct rte_sched_port *port,
 	subport->stats.n_bytes_tc[tc_index] += pkt_len;
 }
 
-#ifdef RTE_SCHED_RED
+#ifdef RTE_SCHED_RED || RTE_SCHED_PIE
 static inline void
 rte_sched_port_update_subport_stats_on_drop(struct rte_sched_port *port,
 	struct rte_sched_subport *subport,
@@ -1533,6 +1559,8 @@ rte_sched_port_update_subport_stats_on_drop(struct rte_sched_port *port,
 	subport->stats.n_bytes_tc_dropped[tc_index] += pkt_len;
 #ifdef RTE_SCHED_RED
 	subport->stats.n_pkts_red_dropped[tc_index] += red;
+#elif defined RTE_SCHED_PIE
+	subport->stats.n_pkts_pie_dropped[tc_index] += red;
 #endif
 }
 
@@ -1548,7 +1576,7 @@ rte_sched_port_update_queue_stats(struct rte_sched_subport *subport,
 	qe->stats.n_bytes += pkt_len;
 }
 
-#ifdef RTE_SCHED_RED
+#ifdef RTE_SCHED_RED || RTE_SCHED_PIE
 static inline void
 rte_sched_port_update_queue_stats_on_drop(struct rte_sched_subport *subport,
 	uint32_t qindex,
@@ -1569,6 +1597,8 @@ rte_sched_port_update_queue_stats_on_drop(struct rte_sched_subport *subport,
 	qe->stats.n_bytes_dropped += pkt_len;
 #ifdef RTE_SCHED_RED
 	qe->stats.n_pkts_red_dropped += red;
+#elif defined RTE_SCHED_PIE
+	qe->stats.n_pkts_pie_dropped += red;
 #endif
 }
 
@@ -1612,6 +1642,36 @@ rte_sched_port_set_queue_empty_timestamp(struct rte_sched_port *port,
 	rte_red_mark_queue_empty(red, port->time);
 }
 
+#elif defined RTE_SCHED_PIE
+
+static inline int
+rte_sched_port_pie_drop(struct rte_sched_port *port,
+	struct rte_sched_subport *subport,
+	struct rte_mbuf *pkt,
+	uint32_t qindex,
+	uint16_t qlen)
+{
+	struct rte_sched_queue_extra *qe;
+	struct rte_pie_config *pie_cfg;
+	struct rte_pie *pie;
+	uint32_t tc_index;
+	enum rte_color color;
+
+	tc_index = rte_sched_port_pipe_tc(port, qindex);
+	color = rte_sched_port_pkt_read_color(pkt);
+	pie_cfg = &subport->pie_config[tc_index][color];
+
+	if ((pie_cfg->target_delay) == 0)
+		return 0;
+
+	qe = subport->queue_extra + qindex;
+	pie = &qe->pie;
+
+	return rte_pie_enqueue(pie_cfg, pie, qlen);//, port->time);
+}
+
+#define rte_sched_port_set_queue_empty_timestamp(port, subport, qindex)
+
 #else
 
 static inline int rte_sched_port_red_drop(struct rte_sched_port *port __rte_unused,
@@ -1623,9 +1683,18 @@ static inline int rte_sched_port_red_drop(struct rte_sched_port *port __rte_unus
 	return 0;
 }
 
+static inline int rte_sched_port_pie_drop(struct rte_sched_port *port __rte_unused,
+	struct rte_sched_subport *subport __rte_unused,
+	struct rte_mbuf *pkt __rte_unused,
+	uint32_t qindex __rte_unused,
+	uint16_t qlen __rte_unused)
+{
+	return 0;
+}
+
 #define rte_sched_port_set_queue_empty_timestamp(port, subport, qindex)
 
-#endif /* RTE_SCHED_RED */
+#endif /* RTE_SCHED_RED RTE_SCHED_PIE */
 
 #ifdef RTE_SCHED_DEBUG
 
@@ -1721,9 +1790,16 @@ rte_sched_port_enqueue_qwa(struct rte_sched_port *port,
 	qlen = q->qw - q->qr;
 
 	/* Drop the packet (and update drop stats) when queue is full */
+#ifndef RTE_SCHED_PIE
 	if (unlikely(rte_sched_port_red_drop(port, subport, pkt, qindex, qlen) ||
 		     (qlen >= qsize))) {
 		rte_pktmbuf_free(pkt);
+#else
+	if (unlikely(rte_sched_port_pie_drop(port, subport, pkt, qindex, qlen) ||
+				 (qlen >= qsize))) {
+			rte_pktmbuf_free(pkt);
+#endif
+
 #ifdef RTE_SCHED_COLLECT_STATS
 		rte_sched_port_update_subport_stats_on_drop(port, subport,
 			qindex, pkt, qlen < qsize);
@@ -2717,6 +2793,23 @@ rte_sched_port_dequeue(struct rte_sched_port *port, struct rte_mbuf **pkts, uint
 	port->pkts_out = pkts;
 	port->n_pkts_out = 0;
 
+	/* ----------------Gokul----------------- */
+#ifdef RTE_SCHED_PIE
+	uint32_t subport_qmask = (1 << (port->n_pipes_per_subport_log2 + 4)) - 1;
+	struct rte_sched_queue_extra *qe;
+
+	/*  record the dequeue time of the packet */
+	for(i = 0; i < n_pkts; i++) {
+		struct rte_pie *red_pie;
+		subport = rte_sched_port_subport(port, pkts[i]);
+		uint32_t qindex = rte_mbuf_sched_queue_get(pkts[i]) & subport_qmask;
+		qe = subport->queue_extra + qindex;
+		red_pie = &qe->pie;
+		uint64_t pkt_timestamp = pkts[i]->timestamp;
+		rte_pie_deque(red_pie, pkt_timestamp);
+	}
+#endif
+	/* ---------------------------------end---------------------*/
 	rte_sched_port_time_resync(port);
 
 	/* Take each queue in the grinder one step further */

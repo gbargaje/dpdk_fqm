@@ -64,6 +64,8 @@ extern "C" {
 /** Random Early Detection (RED) */
 #ifdef RTE_SCHED_RED
 #include "rte_red.h"
+#elif defined RTE_SCHED_PIE
+#include "rte_pie.h"
 #endif
 
 /** Maximum number of queues per pipe.
@@ -189,6 +191,9 @@ struct rte_sched_subport_params {
 #ifdef RTE_SCHED_RED
 	/** RED parameters */
 	struct rte_red_params red_params[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE][RTE_COLORS];
+#elif defined RTE_SCHED_PIE
+	/** PIE parameters */
+	struct rte_pie_params pie_params[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE][RTE_COLORS];
 #endif
 };
 
@@ -209,6 +214,9 @@ struct rte_sched_subport_stats {
 #ifdef RTE_SCHED_RED
 	/** Number of packets dropped by red */
 	uint64_t n_pkts_red_dropped[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE];
+#elif defined RTE_SCHED_PIE
+	// Number of packets dropped by pie
+	uint64_t n_pkts_pie_dropped[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE];
 #endif
 };
 
@@ -223,6 +231,8 @@ struct rte_sched_queue_stats {
 #ifdef RTE_SCHED_RED
 	/** Packets dropped by RED */
 	uint64_t n_pkts_red_dropped;
+#elif defined RTE_SCHED_PIE
+	uint64_t n_pkts_pie_dropped;
 #endif
 
 	/** Bytes successfully written */
