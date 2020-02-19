@@ -320,6 +320,7 @@ pipe_profile_check(struct rte_sched_pipe_params *params,
 	}
 
 	/* TB rate: non-zero, not greater than port rate */
+	RTE_LOG(INFO, SCHED, "tb_rate: %lu, rate: %u\n", params->tb_rate, rate);
 	if (params->tb_rate == 0 ||
 		params->tb_rate > rate) {
 		RTE_LOG(ERR, SCHED,
@@ -716,6 +717,8 @@ rte_sched_subport_check_params(struct rte_sched_subport_params *params,
 	}
 
 	/* n_pipes_per_subport: non-zero, power of 2 */
+	RTE_LOG(INFO, SCHED, "n_pipes_per_subport_enabled: %u, n_max_pipes_per_subport: %u\n",
+			params->n_pipes_per_subport_enabled, n_max_pipes_per_subport);
 	if (params->n_pipes_per_subport_enabled == 0 ||
 		params->n_pipes_per_subport_enabled > n_max_pipes_per_subport ||
 	    !rte_is_power_of_2(params->n_pipes_per_subport_enabled)) {
@@ -1663,7 +1666,7 @@ rte_sched_port_pie_drop(struct rte_sched_port *port,
 
 	if ((pie_cfg->target_delay) == 0)
 		return 0;
-
+	//RTE_LOG(INFO, SCHED, "PIE_DROP: subport->queue_extra: %lx\n",&subport->queue_extra);
 	qe = subport->queue_extra + qindex;
 	pie = &qe->pie;
 
@@ -1743,16 +1746,20 @@ rte_sched_port_enqueue_qptrs_prefetch0(struct rte_sched_subport *subport,
 #ifdef RTE_SCHED_COLLECT_STATS
 	struct rte_sched_queue_extra *qe;
 #endif
+	RTE_LOG(INFO, SCHED, "Before calling rte_mbuf_queue_get from %s\n", __func__);
 	uint32_t qindex = rte_mbuf_sched_queue_get(pkt);
 	uint32_t subport_queue_id = subport_qmask & qindex;
 
 	q = subport->queue + subport_queue_id;
+	RTE_LOG(INFO, SCHED, "Before prefetch calling, %s\n",__func__);
 	rte_prefetch0(q);
+	RTE_LOG(INFO, SCHED, "After prefetch call, %s\n",__func__);
+
 #ifdef RTE_SCHED_COLLECT_STATS
 	qe = subport->queue_extra + subport_queue_id;
 	rte_prefetch0(qe);
 #endif
-
+	RTE_LOG(INFO, SCHED, "Returning from %s\n", __func__);
 	return subport_queue_id;
 }
 
@@ -1788,7 +1795,7 @@ rte_sched_port_enqueue_qwa(struct rte_sched_port *port,
 	q = subport->queue + qindex;
 	qsize = rte_sched_subport_pipe_qsize(port, subport, qindex);
 	qlen = q->qw - q->qr;
-
+	RTE_LOG(INFO, SCHED, "ENQUEUE_QWA: qindex: %u, subport_pipe_qsize: %u, qlen: %u\n",qindex, qsize, qlen);
 	/* Drop the packet (and update drop stats) when queue is full */
 #ifndef RTE_SCHED_PIE
 	if (unlikely(rte_sched_port_red_drop(port, subport, pkt, qindex, qlen) ||
@@ -1797,7 +1804,8 @@ rte_sched_port_enqueue_qwa(struct rte_sched_port *port,
 #else
 	if (unlikely(rte_sched_port_pie_drop(port, subport, pkt, qindex, qlen) ||
 				 (qlen >= qsize))) {
-			rte_pktmbuf_free(pkt);
+		RTE_LOG(INFO, SCHED, "ENQUEUE QWA: Packet has been dropped\n");
+		rte_pktmbuf_free(pkt);
 #endif
 
 #ifdef RTE_SCHED_COLLECT_STATS
@@ -1849,14 +1857,14 @@ rte_sched_port_enqueue(struct rte_sched_port *port, struct rte_mbuf **pkts,
 		**q20_base, **q21_base, **q30_base, **q31_base, **q_last_base;
 	struct rte_sched_subport *subport00, *subport01, *subport10, *subport11,
 		*subport20, *subport21, *subport30, *subport31, *subport_last;
-	uint32_t q00, q01, q10, q11, q20, q21, q30, q31, q_last;
+	uint32_t q00, q01, q10, q11, q20, q21, q30, q31, q_last;	//qindex
 	uint32_t r00, r01, r10, r11, r20, r21, r30, r31, r_last;
 	uint32_t subport_qmask;
 	uint32_t result, i;
 
 	result = 0;
 	subport_qmask = (1 << (port->n_pipes_per_subport_log2 + 4)) - 1;
-
+	RTE_LOG(INFO, SCHED, "ENQUEUE: Subport mask calculated, subport_qmask: %u\n", subport_qmask);
 	/*
 	 * Less then 6 input packets available, which is not enough to
 	 * feed the pipeline
@@ -1865,6 +1873,7 @@ rte_sched_port_enqueue(struct rte_sched_port *port, struct rte_mbuf **pkts,
 		struct rte_sched_subport *subports[5];
 		struct rte_mbuf **q_base[5];
 		uint32_t q[5];
+		RTE_LOG(INFO, SCHED, "ENQUEUE: Unlikely packets are less than 6\n");
 
 		/* Prefetch the mbuf structure of each packet */
 		for (i = 0; i < n_pkts; i++)
@@ -1875,21 +1884,19 @@ rte_sched_port_enqueue(struct rte_sched_port *port, struct rte_mbuf **pkts,
 			subports[i] = rte_sched_port_subport(port, pkts[i]);
 
 		/* Prefetch the queue structure for each queue */
+		//qindex
 		for (i = 0; i < n_pkts; i++)
-			q[i] = rte_sched_port_enqueue_qptrs_prefetch0(subports[i],
-					pkts[i], subport_qmask);
+			q[i] = rte_sched_port_enqueue_qptrs_prefetch0(subports[i], pkts[i], subport_qmask);
 
 		/* Prefetch the write pointer location of each queue */
 		for (i = 0; i < n_pkts; i++) {
 			q_base[i] = rte_sched_subport_pipe_qbase(subports[i], q[i]);
-			rte_sched_port_enqueue_qwa_prefetch0(port, subports[i],
-				q[i], q_base[i]);
+			rte_sched_port_enqueue_qwa_prefetch0(port, subports[i], q[i], q_base[i]);
 		}
 
 		/* Write each packet to its queue */
 		for (i = 0; i < n_pkts; i++)
-			result += rte_sched_port_enqueue_qwa(port, subports[i],
-						q[i], q_base[i], pkts[i]);
+			result += rte_sched_port_enqueue_qwa(port, subports[i],	q[i], q_base[i], pkts[i]);
 
 		return result;
 	}
@@ -1907,10 +1914,8 @@ rte_sched_port_enqueue(struct rte_sched_port *port, struct rte_mbuf **pkts,
 
 	subport20 = rte_sched_port_subport(port, pkt20);
 	subport21 = rte_sched_port_subport(port, pkt21);
-	q20 = rte_sched_port_enqueue_qptrs_prefetch0(subport20,
-			pkt20, subport_qmask);
-	q21 = rte_sched_port_enqueue_qptrs_prefetch0(subport21,
-			pkt21, subport_qmask);
+	q20 = rte_sched_port_enqueue_qptrs_prefetch0(subport20,	pkt20, subport_qmask);
+	q21 = rte_sched_port_enqueue_qptrs_prefetch0(subport21,	pkt21, subport_qmask);
 
 	pkt00 = pkts[4];
 	pkt01 = pkts[5];
@@ -1919,10 +1924,8 @@ rte_sched_port_enqueue(struct rte_sched_port *port, struct rte_mbuf **pkts,
 
 	subport10 = rte_sched_port_subport(port, pkt10);
 	subport11 = rte_sched_port_subport(port, pkt11);
-	q10 = rte_sched_port_enqueue_qptrs_prefetch0(subport10,
-			pkt10, subport_qmask);
-	q11 = rte_sched_port_enqueue_qptrs_prefetch0(subport11,
-			pkt11, subport_qmask);
+	q10 = rte_sched_port_enqueue_qptrs_prefetch0(subport10,	pkt10, subport_qmask);
+	q11 = rte_sched_port_enqueue_qptrs_prefetch0(subport11,	pkt11, subport_qmask);
 
 	q20_base = rte_sched_subport_pipe_qbase(subport20, q20);
 	q21_base = rte_sched_subport_pipe_qbase(subport21, q21);
@@ -1958,10 +1961,8 @@ rte_sched_port_enqueue(struct rte_sched_port *port, struct rte_mbuf **pkts,
 		/* Stage 1: Prefetch subport and queue structure storing queue pointers */
 		subport10 = rte_sched_port_subport(port, pkt10);
 		subport11 = rte_sched_port_subport(port, pkt11);
-		q10 = rte_sched_port_enqueue_qptrs_prefetch0(subport10,
-				pkt10, subport_qmask);
-		q11 = rte_sched_port_enqueue_qptrs_prefetch0(subport11,
-				pkt11, subport_qmask);
+		q10 = rte_sched_port_enqueue_qptrs_prefetch0(subport10,	pkt10, subport_qmask);
+		q11 = rte_sched_port_enqueue_qptrs_prefetch0(subport11,	pkt11, subport_qmask);
 
 		/* Stage 2: Prefetch queue write location */
 		q20_base = rte_sched_subport_pipe_qbase(subport20, q20);
@@ -1970,10 +1971,8 @@ rte_sched_port_enqueue(struct rte_sched_port *port, struct rte_mbuf **pkts,
 		rte_sched_port_enqueue_qwa_prefetch0(port, subport21, q21, q21_base);
 
 		/* Stage 3: Write packet to queue and activate queue */
-		r30 = rte_sched_port_enqueue_qwa(port, subport30,
-				q30, q30_base, pkt30);
-		r31 = rte_sched_port_enqueue_qwa(port, subport31,
-				q31, q31_base, pkt31);
+		r30 = rte_sched_port_enqueue_qwa(port, subport30,q30, q30_base, pkt30);
+		r31 = rte_sched_port_enqueue_qwa(port, subport31,q31, q31_base, pkt31);
 		result += r30 + r31;
 	}
 
@@ -1987,53 +1986,42 @@ rte_sched_port_enqueue(struct rte_sched_port *port, struct rte_mbuf **pkts,
 
 	subport00 = rte_sched_port_subport(port, pkt00);
 	subport01 = rte_sched_port_subport(port, pkt01);
-	q00 = rte_sched_port_enqueue_qptrs_prefetch0(subport00,
-			pkt00, subport_qmask);
-	q01 = rte_sched_port_enqueue_qptrs_prefetch0(subport01,
-			pkt01, subport_qmask);
+	q00 = rte_sched_port_enqueue_qptrs_prefetch0(subport00,	pkt00, subport_qmask);
+	q01 = rte_sched_port_enqueue_qptrs_prefetch0(subport01,	pkt01, subport_qmask);
 
 	q10_base = rte_sched_subport_pipe_qbase(subport10, q10);
 	q11_base = rte_sched_subport_pipe_qbase(subport11, q11);
 	rte_sched_port_enqueue_qwa_prefetch0(port, subport10, q10, q10_base);
 	rte_sched_port_enqueue_qwa_prefetch0(port, subport11, q11, q11_base);
 
-	r20 = rte_sched_port_enqueue_qwa(port, subport20,
-			q20, q20_base, pkt20);
-	r21 = rte_sched_port_enqueue_qwa(port, subport21,
-			q21, q21_base, pkt21);
+	r20 = rte_sched_port_enqueue_qwa(port, subport20, q20, q20_base, pkt20);
+	r21 = rte_sched_port_enqueue_qwa(port, subport21, q21, q21_base, pkt21);
 	result += r20 + r21;
 
 	subport_last = rte_sched_port_subport(port, pkt_last);
-	q_last = rte_sched_port_enqueue_qptrs_prefetch0(subport_last,
-				pkt_last, subport_qmask);
+	q_last = rte_sched_port_enqueue_qptrs_prefetch0(subport_last,pkt_last, subport_qmask);
 
 	q00_base = rte_sched_subport_pipe_qbase(subport00, q00);
 	q01_base = rte_sched_subport_pipe_qbase(subport01, q01);
 	rte_sched_port_enqueue_qwa_prefetch0(port, subport00, q00, q00_base);
 	rte_sched_port_enqueue_qwa_prefetch0(port, subport01, q01, q01_base);
 
-	r10 = rte_sched_port_enqueue_qwa(port, subport10, q10,
-			q10_base, pkt10);
-	r11 = rte_sched_port_enqueue_qwa(port, subport11, q11,
-			q11_base, pkt11);
+	r10 = rte_sched_port_enqueue_qwa(port, subport10, q10, q10_base, pkt10);
+	r11 = rte_sched_port_enqueue_qwa(port, subport11, q11, q11_base, pkt11);
 	result += r10 + r11;
 
 	q_last_base = rte_sched_subport_pipe_qbase(subport_last, q_last);
-	rte_sched_port_enqueue_qwa_prefetch0(port, subport_last,
-		q_last, q_last_base);
+	rte_sched_port_enqueue_qwa_prefetch0(port, subport_last, q_last, q_last_base);
 
-	r00 = rte_sched_port_enqueue_qwa(port, subport00, q00,
-			q00_base, pkt00);
-	r01 = rte_sched_port_enqueue_qwa(port, subport01, q01,
-			q01_base, pkt01);
+	r00 = rte_sched_port_enqueue_qwa(port, subport00, q00, q00_base, pkt00);
+	r01 = rte_sched_port_enqueue_qwa(port, subport01, q01, q01_base, pkt01);
 	result += r00 + r01;
 
 	if (n_pkts & 1) {
-		r_last = rte_sched_port_enqueue_qwa(port, subport_last,
-					q_last,	q_last_base, pkt_last);
+		r_last = rte_sched_port_enqueue_qwa(port, subport_last,	q_last,	q_last_base, pkt_last);
 		result += r_last;
 	}
-
+	RTE_LOG(INFO, SCHED, "ENQUEUE: total %u packets are enqueued\n", result);
 	return result;
 }
 
@@ -2792,21 +2780,42 @@ rte_sched_port_dequeue(struct rte_sched_port *port, struct rte_mbuf **pkts, uint
 
 	port->pkts_out = pkts;
 	port->n_pkts_out = 0;
-
+	
+	RTE_LOG(INFO, SCHED, "Entering the PIE block in Dequeue\n");
 	/* ----------------Gokul----------------- */
 #ifdef RTE_SCHED_PIE
 	uint32_t subport_qmask = (1 << (port->n_pipes_per_subport_log2 + 4)) - 1;
 	struct rte_sched_queue_extra *qe;
-
+	RTE_LOG(INFO, SCHED, "no issues with finding in subport mask\n");
 	/*  record the dequeue time of the packet */
 	for(i = 0; i < n_pkts; i++) {
+		
+		RTE_LOG(INFO, SCHED, "IN LOOP, getting the subport id\n");
 		struct rte_pie *red_pie;
 		subport = rte_sched_port_subport(port, pkts[i]);
-		uint32_t qindex = rte_mbuf_sched_queue_get(pkts[i]) & subport_qmask;
+		
+		RTE_LOG(INFO, SCHED, "ot the subport id, proceeding for qindex, subport_qmask: %u\n", subport_qmask);
+		if(pkts[i] == NULL)
+			RTE_LOG(INFO, SCHED, "Packet is NULL\n");
+		RTE_LOG(INFO, SCHED, "Expected queue id: %u\n",pkts[i]->hash.sched.queue_id);
+		RTE_LOG(INFO, SCHED, "Expected queue index: %u, %s\n",pkts[i]->hash.sched.queue_id & subport_qmask, __func__);
+		//uint32_t qindex = rte_mbuf_sched_queue_get(pkts[i]) & subport_qmask;
+		//uint32_t qindex = rte_sched_port_enqueue_qptrs_prefetch0(subport, pkts[i], subport_qmask);
+		uint32_t qindex = pkts[i]->hash.sched.queue_id & subport_qmask ; 
+		
+		RTE_LOG(INFO, SCHED, "Reading the rte_sched_queue_extra struct, qindex: %u\n", qindex);
+		//RTE_LOG(INFO, SCHED, "DEQUEUE: subport->queue_extra: %u \n", subport->queue_extra);
+		if(subport->queue_extra == 0)
+			RTE_LOG(INFO, SCHED, "queue_extra is null, %s\n",__func__);
 		qe = subport->queue_extra + qindex;
+
+		RTE_LOG(INFO, SCHED, "Got the rte_sched_queue_extra, no issues yet: subport->queue_extra: \n");
 		red_pie = &qe->pie;
 		uint64_t pkt_timestamp = pkts[i]->timestamp;
+
+		RTE_LOG(INFO, SCHED, "heading to pie_dequeue method\n");
 		rte_pie_deque(red_pie, pkt_timestamp);
+		RTE_LOG(INFO, SCHED, "well pie_dequeue is actually fine\n");
 	}
 #endif
 	/* ---------------------------------end---------------------*/
