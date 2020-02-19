@@ -115,8 +115,9 @@ app_main_loop(__attribute__((unused))void *dummy)
 				"flow %u lcoreid %u sched+write port %u\n",
 					i, lcore_id, wt_confs[i]->tx_port);
 		}
-
+		RTE_LOG(INFO, APP, "%s, Im fine till invoking thread..\n",__func__);
 		app_mixed_thread(wt_confs);
+		RTE_LOG(INFO, APP, "%s, No error in app_mixed_thread..\n",__func__);
 	}
 	else if (mode == APP_TX_MODE) {
 		for (i = 0; i < tx_idx; i++) {
@@ -129,7 +130,7 @@ app_main_loop(__attribute__((unused))void *dummy)
 			RTE_LOG(INFO, APP, "flow%u lcoreid%u write port%u\n",
 					i, lcore_id, tx_confs[i]->tx_port);
 		}
-
+		RTE_LOG(INFO, APP, "%s, Im fine till invoking thread..\n",__func__);
 		app_tx_thread(tx_confs);
 	}
 	else if (mode == APP_WT_MODE){
@@ -194,7 +195,15 @@ int
 main(int argc, char **argv)
 {
 	int ret;
-
+#ifdef RTE_SCHED_RED
+	printf("RED is enabled..\n");
+#endif
+#ifdef RTE_SCHED_PIE
+	printf("PIE is enabled..\n");
+#endif
+#ifdef RTE_SCHED_SUBPORT_TC_OV
+	printf("RTE_SCHED_SUBPORT_TC_OV is defined.\n");
+#endif
 	ret = app_parse_args(argc, argv);
 	if (ret < 0)
 		return -1;
