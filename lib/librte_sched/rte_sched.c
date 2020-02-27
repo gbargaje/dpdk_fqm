@@ -320,7 +320,7 @@ pipe_profile_check(struct rte_sched_pipe_params *params,
 	}
 
 	/* TB rate: non-zero, not greater than port rate */
-	RTE_LOG(INFO, SCHED, "tb_rate: %lu, rate: %u\n", params->tb_rate, rate);
+	//RTE_LOG(INFO, SCHED, "tb_rate: %lu, rate: %u\n", params->tb_rate, rate);
 	if (params->tb_rate == 0 ||
 		params->tb_rate > rate) {
 		RTE_LOG(ERR, SCHED,
@@ -717,8 +717,8 @@ rte_sched_subport_check_params(struct rte_sched_subport_params *params,
 	}
 
 	/* n_pipes_per_subport: non-zero, power of 2 */
-	RTE_LOG(INFO, SCHED, "n_pipes_per_subport_enabled: %u, n_max_pipes_per_subport: %u\n",
-			params->n_pipes_per_subport_enabled, n_max_pipes_per_subport);
+	//RTE_LOG(INFO, SCHED, "n_pipes_per_subport_enabled: %u, n_max_pipes_per_subport: %u\n",
+			//params->n_pipes_per_subport_enabled, n_max_pipes_per_subport);
 	if (params->n_pipes_per_subport_enabled == 0 ||
 		params->n_pipes_per_subport_enabled > n_max_pipes_per_subport ||
 	    !rte_is_power_of_2(params->n_pipes_per_subport_enabled)) {
@@ -1746,20 +1746,20 @@ rte_sched_port_enqueue_qptrs_prefetch0(struct rte_sched_subport *subport,
 #ifdef RTE_SCHED_COLLECT_STATS
 	struct rte_sched_queue_extra *qe;
 #endif
-	RTE_LOG(INFO, SCHED, "Before calling rte_mbuf_queue_get from %s\n", __func__);
+	//RTE_LOG(INFO, SCHED, "Before calling rte_mbuf_queue_get from %s\n", __func__);
 	uint32_t qindex = rte_mbuf_sched_queue_get(pkt);
 	uint32_t subport_queue_id = subport_qmask & qindex;
 
 	q = subport->queue + subport_queue_id;
-	RTE_LOG(INFO, SCHED, "Before prefetch calling, %s\n",__func__);
+	//RTE_LOG(INFO, SCHED, "Before prefetch calling, %s\n",__func__);
 	rte_prefetch0(q);
-	RTE_LOG(INFO, SCHED, "After prefetch call, %s\n",__func__);
+	//RTE_LOG(INFO, SCHED, "After prefetch call, %s\n",__func__);
 
 #ifdef RTE_SCHED_COLLECT_STATS
 	qe = subport->queue_extra + subport_queue_id;
 	rte_prefetch0(qe);
 #endif
-	RTE_LOG(INFO, SCHED, "Returning from %s\n", __func__);
+	//RTE_LOG(INFO, SCHED, "Returning from %s\n", __func__);
 	return subport_queue_id;
 }
 
@@ -1795,7 +1795,7 @@ rte_sched_port_enqueue_qwa(struct rte_sched_port *port,
 	q = subport->queue + qindex;
 	qsize = rte_sched_subport_pipe_qsize(port, subport, qindex);
 	qlen = q->qw - q->qr;
-	RTE_LOG(INFO, SCHED, "ENQUEUE_QWA: qindex: %u, subport_pipe_qsize: %u, qlen: %u\n",qindex, qsize, qlen);
+	//RTE_LOG(INFO, SCHED, "ENQUEUE_QWA: qindex: %u, subport_pipe_qsize: %u, qlen: %u\n",qindex, qsize, qlen);
 	/* Drop the packet (and update drop stats) when queue is full */
 #ifndef RTE_SCHED_PIE
 	if (unlikely(rte_sched_port_red_drop(port, subport, pkt, qindex, qlen) ||
@@ -1804,7 +1804,7 @@ rte_sched_port_enqueue_qwa(struct rte_sched_port *port,
 #else
 	if (unlikely(rte_sched_port_pie_drop(port, subport, pkt, qindex, qlen) ||
 				 (qlen >= qsize))) {
-		RTE_LOG(INFO, SCHED, "ENQUEUE QWA: Packet has been dropped\n");
+		//RTE_LOG(INFO, SCHED, "ENQUEUE QWA: Packet has been dropped\n");
 		rte_pktmbuf_free(pkt);
 #endif
 
@@ -1864,7 +1864,7 @@ rte_sched_port_enqueue(struct rte_sched_port *port, struct rte_mbuf **pkts,
 
 	result = 0;
 	subport_qmask = (1 << (port->n_pipes_per_subport_log2 + 4)) - 1;
-	RTE_LOG(INFO, SCHED, "ENQUEUE: Subport mask calculated, subport_qmask: %u\n", subport_qmask);
+	//RTE_LOG(INFO, SCHED, "ENQUEUE: Subport mask calculated, subport_qmask: %u\n", subport_qmask);
 	/*
 	 * Less then 6 input packets available, which is not enough to
 	 * feed the pipeline
@@ -1873,7 +1873,7 @@ rte_sched_port_enqueue(struct rte_sched_port *port, struct rte_mbuf **pkts,
 		struct rte_sched_subport *subports[5];
 		struct rte_mbuf **q_base[5];
 		uint32_t q[5];
-		RTE_LOG(INFO, SCHED, "ENQUEUE: Unlikely packets are less than 6\n");
+		//RTE_LOG(INFO, SCHED, "ENQUEUE: Unlikely packets are less than 6\n");
 
 		/* Prefetch the mbuf structure of each packet */
 		for (i = 0; i < n_pkts; i++)
@@ -2021,7 +2021,7 @@ rte_sched_port_enqueue(struct rte_sched_port *port, struct rte_mbuf **pkts,
 		r_last = rte_sched_port_enqueue_qwa(port, subport_last,	q_last,	q_last_base, pkt_last);
 		result += r_last;
 	}
-	RTE_LOG(INFO, SCHED, "ENQUEUE: total %u packets are enqueued\n", result);
+	//RTE_LOG(INFO, SCHED, "ENQUEUE: total %u packets are enqueued\n", result);
 	return result;
 }
 
@@ -2254,8 +2254,10 @@ grinder_schedule(struct rte_sched_port *port,
 	struct rte_sched_grinder *grinder = subport->grinder + pos;
 	struct rte_sched_queue *queue = grinder->queue[grinder->qpos];
 	struct rte_mbuf *pkt = grinder->pkt;
+
 	uint32_t pkt_len = pkt->pkt_len + port->frame_overhead;
 	uint32_t be_tc_active;
+
 
 	if (!grinder_credits_check(port, subport, pos))
 		return 0;
@@ -2263,6 +2265,16 @@ grinder_schedule(struct rte_sched_port *port,
 	/* Advance port time */
 	port->time += pkt_len;
 
+#ifdef RTE_SCHED_PIE
+	struct rte_pie *pie_rt;
+	struct rte_sched_queue_extra *qe;
+	uint32_t qindex = grinder->qindex[grinder->qpos];
+	qe = subport->queue_extra + qindex;
+
+	pie_rt = &qe->pie;
+	//dequeue function
+	rte_pie_dequeue(pie_rt, pkt->timestamp);
+#endif
 	/* Send packet */
 	port->pkts_out[port->n_pkts_out++] = pkt;
 	queue->qr++;
@@ -2781,13 +2793,13 @@ rte_sched_port_dequeue(struct rte_sched_port *port, struct rte_mbuf **pkts, uint
 	port->pkts_out = pkts;
 	port->n_pkts_out = 0;
 	
-	RTE_LOG(INFO, SCHED, "Entering the PIE block in Dequeue\n");
-	/* ----------------Gokul----------------- */
+	//RTE_LOG(INFO, SCHED, "Entering the PIE block in Dequeue\n");
+	/* ----------------Gokul----------------- 
 #ifdef RTE_SCHED_PIE
 	uint32_t subport_qmask = (1 << (port->n_pipes_per_subport_log2 + 4)) - 1;
 	struct rte_sched_queue_extra *qe;
 	RTE_LOG(INFO, SCHED, "no issues with finding in subport mask\n");
-	/*  record the dequeue time of the packet */
+	record the dequeue time of the packet
 	for(i = 0; i < n_pkts; i++) {
 		
 		RTE_LOG(INFO, SCHED, "IN LOOP, getting the subport id\n");
@@ -2818,7 +2830,7 @@ rte_sched_port_dequeue(struct rte_sched_port *port, struct rte_mbuf **pkts, uint
 		RTE_LOG(INFO, SCHED, "well pie_dequeue is actually fine\n");
 	}
 #endif
-	/* ---------------------------------end---------------------*/
+	 ---------------------------------end---------------------*/
 	rte_sched_port_time_resync(port);
 
 	/* Take each queue in the grinder one step further */

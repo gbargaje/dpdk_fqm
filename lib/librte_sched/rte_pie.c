@@ -48,16 +48,16 @@ int rte_pie_data_init(struct rte_pie *pie){
 int rte_pie_drop(struct rte_pie_config *config, struct rte_pie *pie, uint32_t qlen) {
 	//Safeguard PIE to be work conserving
 	if((pie->cur_qdelay < config->target_delay/2 \
-			&& pie->drop_prob < 858993459/*0.2*/) \
+			&& pie->drop_prob < 858993459) \
 			|| (qlen <= config->mean_pkt_size)){
-		return ENQUE;
+		return ENQUEUE;
 	}
 
 	//function from rte_random.h return random number less than argument specified.
 	uint64_t u = rte_rand() >> 32; //rte_rand_max(MAX_PROB);	//get a 64 bit random number
 	if(u < pie->drop_prob)
 		return DROP;
-	return ENQUE;
+	return ENQUEUE;
 }
 
 //Called on each packet arrival
@@ -72,5 +72,5 @@ int rte_pie_enqueue(struct rte_pie_config *config, struct rte_pie *pie, uint32_t
 			&& pie->old_qdelay< config->target_delay/2) {
 		pie->burst_allowance = config->max_burst;
 	}
-	return ENQUE;
+	return ENQUEUE;
 }

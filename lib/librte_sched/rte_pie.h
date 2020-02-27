@@ -5,8 +5,8 @@
 extern "C" {
 #endif
 
-#define DROP 			0
-#define ENQUE 			1
+#define DROP 			1
+#define ENQUEUE 		0
 #define MAX_PROB		0xffffffff	//2^32
 #define AB_SCALE		5
 //#define TARGET_QDELAY	15000		//in microseconds
@@ -115,7 +115,7 @@ __rte_unused static void rte_pie_cal_drop_prob(
 
 
 //Called on each packet departure
-static inline void rte_pie_deque(struct rte_pie *pie, uint64_t timestamp) {
+static inline void rte_pie_dequeue(struct rte_pie *pie, uint64_t timestamp) {
 	uint64_t now = rte_get_tsc_cycles();			//get the total number of cycles since boot.
 	pie->cur_qdelay = now - timestamp;		//current queue delay in milliseconds.
 }
