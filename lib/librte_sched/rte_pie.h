@@ -1,5 +1,6 @@
 #ifndef __RTE_PIE_H_INCLUDED__
 #define __RTE_PIE_H_INCLUDED__
+#include <bits/stdint-uintn.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -9,10 +10,6 @@ extern "C" {
 #define ENQUEUE 		0
 #define MAX_PROB		0xffffffff	//2^32
 #define AB_SCALE		5
-//#define TARGET_QDELAY	15000		//in microseconds
-//#define MAX_BURST 	150000		//in microseconds
-//#define T_UPDATE		15000		//in milliseconds
-//#define MEAN_PKTSIZE	1500	//to be decided
 
 #include <stdio.h>
 #include <rte_common.h>
@@ -22,7 +19,7 @@ extern "C" {
 struct rte_pie_params{
 	uint32_t target_delay;		//Target Queue Delay
 	uint32_t t_update;			//drop rate calculation period
-	uint32_t mean_pkt_size;		//Mean packet size in number of packets.
+	uint32_t mean_pkt_size;		//(2 * Mean packet size) in number of packets.
 	uint32_t max_burst;
 };
 
@@ -31,7 +28,7 @@ struct rte_pie_config {
 	uint32_t t_update;			//drop rate calculation period
 	uint32_t alpha;
 	uint32_t beta;
-	uint32_t mean_pkt_size;		//Mean packet size in number of packets.
+	uint32_t mean_pkt_size;		//(2*Mean packet size) in number of packets.
 	uint32_t max_burst;
 };
 
@@ -43,6 +40,7 @@ struct rte_pie {
 	uint64_t accu_prob;			//Accumulated drop rate.. Derandomization.
 };
 
+//may or may not be required
 struct rte_pie_all {
 	struct rte_pie_config *pie_config;
 	struct rte_pie *pie;
@@ -65,6 +63,7 @@ __rte_unused static void rte_pie_cal_drop_prob(
 	struct rte_pie_all *pie_all = (struct rte_pie_all *) arg;
 	struct rte_pie_config *config = pie_all->pie_config;
 	struct rte_pie *pie = pie_all->pie;
+
 	uint64_t cur_qdelay = pie->cur_qdelay;			//in hz
 	uint64_t old_qdelay = pie->old_qdelay;			//in hz
 	uint64_t target_delay = config->target_delay;	//in microseconds
