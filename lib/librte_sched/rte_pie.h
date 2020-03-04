@@ -52,6 +52,7 @@ int rte_pie_config_init(struct rte_pie_config*, uint32_t, uint32_t, uint32_t, ui
 int rte_pie_data_init(struct rte_pie *);
 int rte_pie_drop(struct rte_pie_config *, struct rte_pie *, uint32_t);
 int rte_pie_enqueue(struct rte_pie_config *, struct rte_pie *, uint32_t);
+void rte_pie_timer_init(void);
 
 static inline uint64_t max(uint64_t a, uint64_t b)
 {

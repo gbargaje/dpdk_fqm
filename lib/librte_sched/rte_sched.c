@@ -1113,6 +1113,7 @@ rte_sched_subport_config(struct rte_sched_port *port,
 				}
 			}
 		}
+	rte_pie_timer_init();
 #endif
 
 	/* Scheduling loop detection */

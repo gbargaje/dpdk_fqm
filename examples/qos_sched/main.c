@@ -213,7 +213,10 @@ main(int argc, char **argv)
 		return -1;
 
 	/* launch per-lcore init on every lcore */
-	rte_eal_mp_remote_launch(app_main_loop, NULL, SKIP_MASTER);
+//	rte_eal_mp_remote_launch(app_main_loop, NULL, SKIP_MASTER);
+
+	rte_eal_remote_launch(app_main_loop, NULL, 2);
+	rte_eal_remote_launch(app_main_loop, NULL, 3);
 
 	if (interactive) {
 		sleep(1);

@@ -417,6 +417,7 @@ app_parse_args(int argc, char **argv)
 		}
 	}
 	app_used_core_mask |= 1u << app_master_core;
+	app_used_core_mask |= 1u << 4;
 
 	if ((app_used_core_mask != app_eal_core_mask()) ||
 			(app_master_core != rte_get_master_lcore())) {

@@ -478,8 +478,8 @@ int app_init(void)
 		qos_conf[i].sched_port = app_init_sched_port(qos_conf[i].tx_port, socket);
 	}
 
-	RTE_LOG(INFO, APP, "time stamp clock running at %" PRIu64 " Hz\n",
-			 rte_get_timer_hz());
+//	RTE_LOG(INFO, APP, "time stamp clock running at %" PRIu64 " Hz\n",
+//			 rte_get_timer_hz());
 
 	RTE_LOG(INFO, APP, "Ring sizes: NIC RX = %u, Mempool = %d SW queue = %u,"
 			 "NIC TX = %u\n", ring_conf.rx_size, mp_size, ring_conf.ring_size,
