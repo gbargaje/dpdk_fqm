@@ -1,11 +1,10 @@
 #include <stdio.h>
-#include <rte_pie.h>
 #include <rte_random.h>
 #include <rte_timer.h>
 
 #define TIMER_RESOLUTION_CYCLES 20000000ULL /* around 10ms at 2 Ghz */
 static struct rte_timer timer0;
-
+#include <rte_pie.h>
 
 int
 rte_pie_config_init(struct rte_pie_config *config,
@@ -25,12 +24,14 @@ rte_pie_config_init(struct rte_pie_config *config,
 	if(mean_pkt_size == 0)
 		mean_pkt_size = 2;
 
-	config->target_delay 	= target_delay * 1000u;		//15000ul;	//15ms in microseconds
-	config->t_update		= t_update * 1000u;			//15000ul;	//same as above
+	uint64_t cycles 		= rte_get_timer_hz();		//returns number of cycles in one second.
+
+	config->target_delay 	= target_delay  * cycles / 1000u;		//15ms or number of cycles in 15ms
+	config->t_update		= t_update * cycles / 1000u;			//same as above
 	config->alpha			= 2;						//0.125 of 2^5
 	config->beta			= 20;						//1.25	of 2^5
 	config->mean_pkt_size	= mean_pkt_size;			//(2)	Confirm how it should be
-	config->max_burst		= max_burst * 1000u;		//150000ul;	//150ms
+	config->max_burst		= max_burst * cycles / 1000u;		//number of cycles in max_burst milliseconds
 
 	return 0;
 }
@@ -40,7 +41,9 @@ int rte_pie_data_init(struct rte_pie *pie){
 	if(pie == NULL)
 		return -1;
 
-	pie->burst_allowance 	= 150000ul;	//max burst
+	uint64_t cycles 		= rte_get_timer_hz();		//returns number of cycles in one second.
+
+	pie->burst_allowance 	= 150 * cycles / 1000u;		//max burst
 	pie->drop_prob 			= 0;
 	pie->cur_qdelay 		= 0;
 	pie->old_qdelay			= 0;
@@ -99,6 +102,7 @@ void rte_pie_timer_init(void) {
 }
 
 int rte_pie_drop(struct rte_pie_config *config, struct rte_pie *pie, uint32_t qlen) {
+
 	//Safeguard PIE to be work conserving
 	if((pie->cur_qdelay < config->target_delay/2 \
 			&& pie->drop_prob < 858993459) \
@@ -106,8 +110,8 @@ int rte_pie_drop(struct rte_pie_config *config, struct rte_pie *pie, uint32_t ql
 		return ENQUEUE;
 	}
 
-	//function from rte_random.h return random number less than argument specified.
-	uint64_t u = rte_rand() >> 32; //rte_rand_max(MAX_PROB);	//get a 64 bit random number
+	uint64_t u = rte_rand() >> 32; //get a 64 bit random number and concert it to 32 bit
+
 	if(u < pie->drop_prob)
 		return DROP;
 	return ENQUEUE;

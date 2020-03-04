@@ -1176,6 +1176,38 @@ rte_sched_subport_config(struct rte_sched_port *port,
 	s->tc_ov_rate = 0;
 #endif
 
+#ifndef RTE_SCHED_RED
+#ifdef RTE_SCHED_PIE
+
+	static struct rte_timer **timer; //[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE][RTE_COLORS];
+	timer = (struct rte_timer **) malloc(sizeof(struct rte_timer *) * RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE);
+	for(i = 0; i < RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++)
+		timer[i] = (struct rte_timer *)malloc(sizeof(struct rte_timer) * RTE_COLORS);
+
+	uint64_t hz;
+	unsigned lcore_id;
+	struct rte_sched_queue_extra *qe;
+
+	rte_timer_subsystem_init();
+
+	for (i = 0; i < RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++) {
+		for (uint32_t j = 0; j < RTE_COLORS; j++){
+			rte_timer_init(&timer[i][j]);
+			hz = s->pie_config[i][j].t_update; 	//periodic timer which will be invoked on every t_update time
+			lcore_id = rte_lcore_id();		//get the current lcore id.
+
+			struct rte_pie_all *pie_all = (struct rte_pie_all *)malloc(sizeof(struct rte_pie_all));
+			pie_all->pie_config = &s->pie_config[i][j];
+
+			qe = s->queue_extra + i;
+			pie_all->pie = &qe->pie;
+
+			rte_timer_reset(&timer[i][j], hz, PERIODICAL,
+					lcore_id, rte_pie_cal_drop_prob, (void *) pie_all);
+		}
+	}
+#endif
+#endif
 	rte_sched_port_log_subport_config(port, subport_id);
 
 	return 0;
@@ -1793,6 +1825,7 @@ rte_sched_port_enqueue_qwa(struct rte_sched_port *port,
 	uint16_t qsize;
 	uint16_t qlen;
 
+	pkt->timestamp = rte_get_tsc_cycles();
 	q = subport->queue + qindex;
 	qsize = rte_sched_subport_pipe_qsize(port, subport, qindex);
 	qlen = q->qw - q->qr;
@@ -1870,6 +1903,9 @@ rte_sched_port_enqueue(struct rte_sched_port *port, struct rte_mbuf **pkts,
 	 * Less then 6 input packets available, which is not enough to
 	 * feed the pipeline
 	 */
+#ifdef RTE_SCHED_PIE
+	rte_timer_manage();
+#endif
 	if (unlikely(n_pkts < 6)) {
 		struct rte_sched_subport *subports[5];
 		struct rte_mbuf **q_base[5];
