@@ -1189,15 +1189,14 @@ rte_sched_subport_config(struct rte_sched_port *port,
 
 	rte_timer_subsystem_init();
 
+	lcore_id = rte_lcore_id();		//get the current lcore id.
+
 	for (i = 0; i < RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++) {
 		for (uint32_t j = 0; j < RTE_COLORS; j++){
 			rte_timer_init(&timer[i][j]);
 			hz = s->pie_config[i][j].t_update; 	//periodic timer which will be invoked on every t_update time
-			lcore_id = rte_lcore_id();		//get the current lcore id.
-
 			struct rte_pie_all *pie_all = (struct rte_pie_all *)malloc(sizeof(struct rte_pie_all));
 			pie_all->pie_config = &s->pie_config[i][j];
-
 			qe = s->queue_extra + i;
 			pie_all->pie = &qe->pie;
 

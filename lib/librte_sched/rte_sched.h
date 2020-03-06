@@ -399,6 +399,33 @@ rte_sched_subport_read_stats(struct rte_sched_port *port,
 	struct rte_sched_subport_stats *stats,
 	uint32_t *tc_ov);
 
+#ifndef RTE_SCHED_RED
+#ifdef RTE_SCHED_PIE
+
+__rte_unused
+static __attribute__((noreturn)) int
+rte_pie_timer_mainloop(__attribute__((unused)) void *arg)
+{
+        uint64_t prev_tsc = 0, cur_tsc, diff_tsc;
+        unsigned lcore_id;
+
+        lcore_id = rte_lcore_id();
+        printf("GOKUL: Starting mainloop on core %u\n", lcore_id);
+        uint64_t cycles = 5 * rte_get_timer_hz() / 1000u;
+
+        while (1) {
+                cur_tsc = rte_rdtsc();
+                diff_tsc = cur_tsc - prev_tsc;
+                if (diff_tsc > cycles) { //TIMER_RESOLUTION_CYCLES) {
+                        rte_timer_manage();
+                        prev_tsc = cur_tsc;
+                }
+        }
+}
+#endif
+#endif
+
+
 /**
  * Hierarchical scheduler queue statistics read
  *
