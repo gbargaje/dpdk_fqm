@@ -195,15 +195,7 @@ int
 main(int argc, char **argv)
 {
 	int ret;
-#ifdef RTE_SCHED_RED
-	printf("RED is enabled..\n");
-#endif
-#ifdef RTE_SCHED_PIE
-	printf("PIE is enabled..\n");
-#endif
-#ifdef RTE_SCHED_SUBPORT_TC_OV
-	printf("RTE_SCHED_SUBPORT_TC_OV is defined.\n");
-#endif
+
 	ret = app_parse_args(argc, argv);
 	if (ret < 0)
 		return -1;
@@ -214,6 +206,7 @@ main(int argc, char **argv)
 
 	/* launch per-lcore init on every lcore */
 	rte_eal_mp_remote_launch(app_main_loop, NULL, SKIP_MASTER);
+	//rte_eal_remote_launch(rte_pie_timer_mainloop, NULL, 1);
 
 	if (interactive) {
 		sleep(1);
@@ -221,9 +214,19 @@ main(int argc, char **argv)
 	}
 	else {
 		/* print statistics every second */
+		uint64_t cycles = rte_get_timer_hz();
+		uint64_t prev_tsc = 0, cur_tsc, diff_tsc;
 		while(1) {
-			sleep(1);
-			app_stat();
+			//sleep(1);
+			rte_pie_timer_mainloop(NULL);
+			
+			cur_tsc = rte_rdtsc();
+			diff_tsc = cur_tsc - prev_tsc;
+			if (diff_tsc > cycles) {
+				app_stat();
+				prev_tsc = cur_tsc;
+			}
+			//app_stat();
 		}
 	}
 
