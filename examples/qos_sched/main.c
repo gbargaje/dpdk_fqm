@@ -115,8 +115,9 @@ app_main_loop(__attribute__((unused))void *dummy)
 				"flow %u lcoreid %u sched+write port %u\n",
 					i, lcore_id, wt_confs[i]->tx_port);
 		}
-
+		RTE_LOG(INFO, APP, "%s, Im fine till invoking thread..\n",__func__);
 		app_mixed_thread(wt_confs);
+		RTE_LOG(INFO, APP, "%s, No error in app_mixed_thread..\n",__func__);
 	}
 	else if (mode == APP_TX_MODE) {
 		for (i = 0; i < tx_idx; i++) {
@@ -129,7 +130,7 @@ app_main_loop(__attribute__((unused))void *dummy)
 			RTE_LOG(INFO, APP, "flow%u lcoreid%u write port%u\n",
 					i, lcore_id, tx_confs[i]->tx_port);
 		}
-
+		RTE_LOG(INFO, APP, "%s, Im fine till invoking thread..\n",__func__);
 		app_tx_thread(tx_confs);
 	}
 	else if (mode == APP_WT_MODE){
@@ -205,6 +206,7 @@ main(int argc, char **argv)
 
 	/* launch per-lcore init on every lcore */
 	rte_eal_mp_remote_launch(app_main_loop, NULL, SKIP_MASTER);
+	//rte_eal_remote_launch(rte_pie_timer_mainloop, NULL, 1);
 
 	if (interactive) {
 		sleep(1);
@@ -212,9 +214,19 @@ main(int argc, char **argv)
 	}
 	else {
 		/* print statistics every second */
+		uint64_t cycles = rte_get_timer_hz();
+		uint64_t prev_tsc = 0, cur_tsc, diff_tsc;
 		while(1) {
-			sleep(1);
-			app_stat();
+			//sleep(1);
+			rte_pie_timer_mainloop(NULL);
+			
+			cur_tsc = rte_rdtsc();
+			diff_tsc = cur_tsc - prev_tsc;
+			if (diff_tsc > cycles) {
+				app_stat();
+				prev_tsc = cur_tsc;
+			}
+			//app_stat();
 		}
 	}
 

@@ -188,9 +188,9 @@ static struct rte_sched_pipe_params pipe_profiles[MAX_SCHED_PIPE_PROFILES] = {
 		.tc_rate = {305175, 305175, 305175, 305175, 305175, 305175,
 			305175, 305175, 305175, 305175, 305175, 305175, 305175},
 		.tc_period = 40,
-#ifdef RTE_SCHED_SUBPORT_TC_OV
+//#ifdef RTE_SCHED_SUBPORT_TC_OV
 		.tc_ov_weight = 1,
-#endif
+//#endif
 
 		.wrr_weights = {1, 1, 1, 1},
 	},
@@ -205,7 +205,7 @@ struct rte_sched_subport_params subport_params[MAX_SCHED_SUBPORTS] = {
 			1250000000, 1250000000, 1250000000, 1250000000, 1250000000,
 			1250000000, 1250000000, 1250000000, 1250000000},
 		.tc_period = 10,
-		.n_pipes_per_subport_enabled = 4096,
+		.n_pipes_per_subport_enabled = 1,
 		.qsize = {64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64},
 		.pipe_profiles = pipe_profiles,
 		.n_pipe_profiles = sizeof(pipe_profiles) /
@@ -278,7 +278,74 @@ struct rte_sched_subport_params subport_params[MAX_SCHED_SUBPORTS] = {
 		[12][1] = {.min_th = 40, .max_th = 64, .maxp_inv = 10, .wq_log2 = 9},
 		[12][2] = {.min_th = 32, .max_th = 64, .maxp_inv = 10, .wq_log2 = 9},
 	},
-#endif /* RTE_SCHED_RED */
+#elif defined RTE_SCHED_PIE /* RTE_SCHED_RED */
+	.pie_params = {
+		/* Traffic Class 0 Colors Green / Yellow / Red */
+		[0][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[0][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[0][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+
+		/* Traffic Class 1 - Colors Green / Yellow / Red */
+		[1][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[1][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[1][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+
+		/* Traffic Class 2 - Colors Green / Yellow / Red */
+		[2][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[2][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[2][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+
+		/* Traffic Class 3 - Colors Green / Yellow / Red */
+		[3][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[3][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[3][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+
+		/* Traffic Class 4 - Colors Green / Yellow / Red */
+		[4][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[4][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[4][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+
+		/* Traffic Class 5 - Colors Green / Yellow / Red */
+		[5][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[5][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[5][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+
+		/* Traffic Class 6 - Colors Green / Yellow / Red */
+		[6][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[6][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[6][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+
+		/* Traffic Class 7 - Colors Green / Yellow / Red */
+		[7][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[7][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[7][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+
+		/* Traffic Class 8 - Colors Green / Yellow / Red */
+		[8][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[8][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[8][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+
+		/* Traffic Class 9 - Colors Green / Yellow / Red */
+		[9][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[9][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[9][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+
+		/* Traffic Class 10 - Colors Green / Yellow / Red */
+		[10][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[10][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[10][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+
+		/* Traffic Class 11 - Colors Green / Yellow / Red */
+		[11][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[11][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[11][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+
+		/* Traffic Class 12 - Colors Green / Yellow / Red */
+		[12][0] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[12][1] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+		[12][2] = {.target_delay = 15, .t_update = 15, .mean_pkt_size = 2, .max_burst = 150},
+	},
+#endif /* RTE_SCHED_PIE */
 	},
 };
 

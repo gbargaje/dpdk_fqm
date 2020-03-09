@@ -154,11 +154,13 @@ app_send_packets(struct thread_conf *qconf, struct rte_mbuf **mbufs, uint32_t nb
 void
 app_tx_thread(struct thread_conf **confs)
 {
+	printf("I am not causing the error..\n");
 	struct rte_mbuf *mbufs[burst_conf.qos_dequeue];
 	struct thread_conf *conf;
 	int conf_idx = 0;
 	int retval;
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * BURST_TX_DRAIN_US;
+	printf("No issues till here\n");
 
 	while ((conf = confs[conf_idx])) {
 		retval = rte_ring_sc_dequeue_bulk(conf->tx_ring, (void **)mbufs,
@@ -227,17 +229,21 @@ app_worker_thread(struct thread_conf **confs)
 void
 app_mixed_thread(struct thread_conf **confs)
 {
+
 	struct rte_mbuf *mbufs[burst_conf.ring_burst];
 	struct thread_conf *conf;
 	int conf_idx = 0;
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * BURST_TX_DRAIN_US;
+	//RTE_LOG(INFO, APP, "Entered in app_mixed_thread function\n");
 
 	while ((conf = confs[conf_idx])) {
 		uint32_t nb_pkt;
 
 		/* Read packet from the ring */
+		//RTE_LOG(INFO, APP, "APP_MIXED_THRAD, Before reading rx packets..\n");
 		nb_pkt = rte_ring_sc_dequeue_burst(conf->rx_ring, (void **)mbufs,
 					burst_conf.ring_burst, NULL);
+		//RTE_LOG(INFO, APP, "APP_MIXED_THREAD, Read the rx packets \n");
 		if (likely(nb_pkt)) {
 			int nb_sent = rte_sched_port_enqueue(conf->sched_port, mbufs,
 					nb_pkt);
@@ -245,10 +251,10 @@ app_mixed_thread(struct thread_conf **confs)
 			APP_STATS_ADD(conf->stat.nb_drop, nb_pkt - nb_sent);
 			APP_STATS_ADD(conf->stat.nb_rx, nb_pkt);
 		}
-
-
+		//RTE_LOG(INFO, APP, "APP_MIXED THREAD, Calling port dequeue\n");
 		nb_pkt = rte_sched_port_dequeue(conf->sched_port, mbufs,
 					burst_conf.qos_dequeue);
+		//RTE_LOG(INFO, APP, "APP MIXED THREAD, call of port_dequeue was successful..\n");
 		if (likely(nb_pkt > 0)) {
 			app_send_packets(conf, mbufs, nb_pkt);
 
@@ -273,4 +279,5 @@ app_mixed_thread(struct thread_conf **confs)
 		if (confs[conf_idx] == NULL)
 			conf_idx = 0;
 	}
+	//RTE_LOG(INFO, APP, "Exiting APP MIXED THREAD\n");
 }

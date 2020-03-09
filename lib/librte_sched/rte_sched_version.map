@@ -8,6 +8,12 @@ DPDK_20.0 {
 	rte_red_rand_seed;
 	rte_red_rand_val;
 	rte_red_rt_data_init;
+	rte_pie_params_init;
+	rte_pie_init;
+	rte_pie_drop;
+	rte_pie_cale_drop_prob;
+	rte_pie_enque;
+	rte_pie_deque;
 	rte_sched_pipe_config;
 	rte_sched_port_config;
 	rte_sched_port_dequeue;
