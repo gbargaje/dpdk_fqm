@@ -122,6 +122,9 @@ enum mlx5_feature_name {
 /* Queue items. */
 #define MLX5_FLOW_ITEM_TX_QUEUE (1u << 27)
 
+/* Pattern tunnel Layer bits (continued). */
+#define MLX5_FLOW_LAYER_GTP (1u << 28)
+
 /* Outer Masks. */
 #define MLX5_FLOW_LAYER_OUTER_L3 \
 	(MLX5_FLOW_LAYER_OUTER_L3_IPV4 | MLX5_FLOW_LAYER_OUTER_L3_IPV6)
@@ -131,18 +134,12 @@ enum mlx5_feature_name {
 	(MLX5_FLOW_LAYER_OUTER_L2 | MLX5_FLOW_LAYER_OUTER_L3 | \
 	 MLX5_FLOW_LAYER_OUTER_L4)
 
-/* LRO support mask, i.e. flow contains IPv4/IPv6 and TCP. */
-#define MLX5_FLOW_LAYER_IPV4_LRO \
-	(MLX5_FLOW_LAYER_OUTER_L3_IPV4 | MLX5_FLOW_LAYER_OUTER_L4_TCP)
-#define MLX5_FLOW_LAYER_IPV6_LRO \
-	(MLX5_FLOW_LAYER_OUTER_L3_IPV6 | MLX5_FLOW_LAYER_OUTER_L4_TCP)
-
 /* Tunnel Masks. */
 #define MLX5_FLOW_LAYER_TUNNEL \
 	(MLX5_FLOW_LAYER_VXLAN | MLX5_FLOW_LAYER_VXLAN_GPE | \
 	 MLX5_FLOW_LAYER_GRE | MLX5_FLOW_LAYER_NVGRE | MLX5_FLOW_LAYER_MPLS | \
 	 MLX5_FLOW_LAYER_IPIP | MLX5_FLOW_LAYER_IPV6_ENCAP | \
-	 MLX5_FLOW_LAYER_GENEVE)
+	 MLX5_FLOW_LAYER_GENEVE | MLX5_FLOW_LAYER_GTP)
 
 /* Inner Masks. */
 #define MLX5_FLOW_LAYER_INNER_L3 \
@@ -202,6 +199,8 @@ enum mlx5_feature_name {
 #define MLX5_FLOW_ACTION_MARK_EXT (1ull << 33)
 #define MLX5_FLOW_ACTION_SET_META (1ull << 34)
 #define MLX5_FLOW_ACTION_METER (1ull << 35)
+#define MLX5_FLOW_ACTION_SET_IPV4_DSCP (1ull << 36)
+#define MLX5_FLOW_ACTION_SET_IPV6_DSCP (1ull << 37)
 
 #define MLX5_FLOW_FATE_ACTIONS \
 	(MLX5_FLOW_ACTION_DROP | MLX5_FLOW_ACTION_QUEUE | \
@@ -238,7 +237,9 @@ enum mlx5_feature_name {
 				      MLX5_FLOW_ACTION_OF_SET_VLAN_VID | \
 				      MLX5_FLOW_ACTION_SET_TAG | \
 				      MLX5_FLOW_ACTION_MARK_EXT | \
-				      MLX5_FLOW_ACTION_SET_META)
+				      MLX5_FLOW_ACTION_SET_META | \
+				      MLX5_FLOW_ACTION_SET_IPV4_DSCP | \
+				      MLX5_FLOW_ACTION_SET_IPV6_DSCP)
 
 #define MLX5_FLOW_VLAN_ACTIONS (MLX5_FLOW_ACTION_OF_POP_VLAN | \
 				MLX5_FLOW_ACTION_OF_PUSH_VLAN)
@@ -288,6 +289,27 @@ enum mlx5_feature_name {
 /* IBV hash source bits  for IPV6. */
 #define MLX5_IPV6_IBV_RX_HASH (IBV_RX_HASH_SRC_IPV6 | IBV_RX_HASH_DST_IPV6)
 
+/* IBV hash bits for L3 SRC. */
+#define MLX5_L3_SRC_IBV_RX_HASH (IBV_RX_HASH_SRC_IPV4 | IBV_RX_HASH_SRC_IPV6)
+
+/* IBV hash bits for L3 DST. */
+#define MLX5_L3_DST_IBV_RX_HASH (IBV_RX_HASH_DST_IPV4 | IBV_RX_HASH_DST_IPV6)
+
+/* IBV hash bits for TCP. */
+#define MLX5_TCP_IBV_RX_HASH (IBV_RX_HASH_SRC_PORT_TCP | \
+			      IBV_RX_HASH_DST_PORT_TCP)
+
+/* IBV hash bits for UDP. */
+#define MLX5_UDP_IBV_RX_HASH (IBV_RX_HASH_SRC_PORT_UDP | \
+			      IBV_RX_HASH_DST_PORT_UDP)
+
+/* IBV hash bits for L4 SRC. */
+#define MLX5_L4_SRC_IBV_RX_HASH (IBV_RX_HASH_SRC_PORT_TCP | \
+				 IBV_RX_HASH_SRC_PORT_UDP)
+
+/* IBV hash bits for L4 DST. */
+#define MLX5_L4_DST_IBV_RX_HASH (IBV_RX_HASH_DST_PORT_TCP | \
+				 IBV_RX_HASH_DST_PORT_UDP)
 
 /* Geneve header first 16Bit */
 #define MLX5_GENEVE_VER_MASK 0x3
@@ -370,11 +392,14 @@ struct mlx5_flow_dv_tag_resource {
 
 /*
  * Number of modification commands.
- * If extensive metadata registers are supported
- * the maximal actions amount is 16 and 8 otherwise.
+ * If extensive metadata registers are supported, the maximal actions amount is
+ * 16 and 8 otherwise on root table. The validation could also be done in the
+ * lower driver layer.
+ * On non-root table, there is no limitation, but 32 is enough right now.
  */
-#define MLX5_MODIFY_NUM 16
-#define MLX5_MODIFY_NUM_NO_MREG 8
+#define MLX5_MAX_MODIFY_NUM			32
+#define MLX5_ROOT_TBL_MODIFY_NUM		16
+#define MLX5_ROOT_TBL_MODIFY_NUM_NO_MREG	8
 
 /* Modify resource structure */
 struct mlx5_flow_dv_modify_hdr_resource {
@@ -385,9 +410,9 @@ struct mlx5_flow_dv_modify_hdr_resource {
 	/**< Verbs modify header action object. */
 	uint8_t ft_type; /**< Flow table type, Rx or Tx. */
 	uint32_t actions_num; /**< Number of modification actions. */
-	struct mlx5_modification_cmd actions[MLX5_MODIFY_NUM];
-	/**< Modification actions. */
 	uint64_t flags; /**< Flags for RDMA API. */
+	struct mlx5_modification_cmd actions[];
+	/**< Modification actions. */
 };
 
 /* Jump action resource structure. */

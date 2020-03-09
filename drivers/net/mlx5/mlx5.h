@@ -195,6 +195,7 @@ struct mlx5_hca_attr {
 	uint32_t vport_inline_mode:3;
 	uint32_t tunnel_stateless_geneve_rx:1;
 	uint32_t geneve_max_opt_len:1; /* 0x0: 14DW, 0x1: 63DW */
+	uint32_t tunnel_stateless_gtp:1;
 	uint32_t lro_cap:1;
 	uint32_t tunnel_lro_gre:1;
 	uint32_t tunnel_lro_vxlan:1;
@@ -218,8 +219,11 @@ TAILQ_HEAD(mlx5_flows, rte_flow);
 #define MLX5_LRO_SUPPORTED(dev) \
 	(((struct mlx5_priv *)((dev)->data->dev_private))->config.lro.supported)
 
+/* Maximal size of coalesced segment for LRO is set in chunks of 256 Bytes. */
+#define MLX5_LRO_SEG_CHUNK_SIZE	256u
+
 /* Maximal size of aggregated LRO packet. */
-#define MLX5_MAX_LRO_SIZE (UINT8_MAX * 256u)
+#define MLX5_MAX_LRO_SIZE (UINT8_MAX * MLX5_LRO_SEG_CHUNK_SIZE)
 
 /* LRO configurations structure. */
 struct mlx5_lro_config {
@@ -972,6 +976,8 @@ struct mlx5_flow_counter *mlx5_counter_alloc(struct rte_eth_dev *dev);
 void mlx5_counter_free(struct rte_eth_dev *dev, struct mlx5_flow_counter *cnt);
 int mlx5_counter_query(struct rte_eth_dev *dev, struct mlx5_flow_counter *cnt,
 		       bool clear, uint64_t *pkts, uint64_t *bytes);
+int mlx5_flow_dev_dump(struct rte_eth_dev *dev, FILE *file,
+		       struct rte_flow_error *error);
 
 /* mlx5_mp.c */
 void mlx5_mp_req_start_rxtx(struct rte_eth_dev *dev);
@@ -984,6 +990,11 @@ int mlx5_mp_init_primary(void);
 void mlx5_mp_uninit_primary(void);
 int mlx5_mp_init_secondary(void);
 void mlx5_mp_uninit_secondary(void);
+
+/* mlx5_socket.c */
+
+int mlx5_pmd_socket_init(void);
+void mlx5_pmd_socket_uninit(void);
 
 /* mlx5_nl.c */
 
@@ -1045,6 +1056,8 @@ int mlx5_devx_cmd_modify_sq
 struct mlx5_devx_obj *mlx5_devx_cmd_create_tis
 	(struct ibv_context *ctx, struct mlx5_devx_tis_attr *tis_attr);
 struct mlx5_devx_obj *mlx5_devx_cmd_create_td(struct ibv_context *ctx);
+
+int mlx5_devx_cmd_flow_dump(struct mlx5_ibv_shared *sh, FILE *file);
 
 /* mlx5_flow_meter.c */
 

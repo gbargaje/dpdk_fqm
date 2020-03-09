@@ -64,6 +64,8 @@ Features
 - Multiple TX and RX queues.
 - Support for scattered TX and RX frames.
 - IPv4, IPv6, TCPv4, TCPv6, UDPv4 and UDPv6 RSS on any number of queues.
+- RSS using different combinations of fields: L3 only, L4 only or both,
+  and source only, destination only or both.
 - Several RSS hash keys, one for each flow type.
 - Default RSS operation with no hash key specification.
 - Configurable RETA table.
@@ -88,6 +90,7 @@ Features
 - Statistics query including Basic, Extended and per queue.
 - Rx HW timestamp.
 - Tunnel types: VXLAN, L3 VXLAN, VXLAN-GPE, GRE, MPLSoGRE, MPLSoUDP, IP-in-IP, Geneve.
+- Tunnel types: VXLAN, L3 VXLAN, VXLAN-GPE, GRE, MPLSoGRE, MPLSoUDP, IP-in-IP, Geneve, GTP.
 - Tunnel HW offloads: packet type, inner/outer RSS, IP and UDP checksum verification.
 - NIC HW offloads: encapsulation (vxlan, gre, mplsoudp, mplsogre), NAT, routing, TTL
   increment/decrement, count, drop, mark. For details please see :ref:`mlx5_offloads_support`.
@@ -156,6 +159,11 @@ Limitations
 
 - VF: flow rules created on VF devices can only match traffic targeted at the
   configured MAC addresses (see ``rte_eth_dev_mac_addr_add()``).
+
+- Match on GTP tunnel header item supports the following fields only:
+
+     - msg_type
+     - teid
 
 .. note::
 
@@ -786,6 +794,10 @@ Below are some firmware configurations listed.
 
    FLEX_PARSER_PROFILE_ENABLE=0
 
+- enable GTP flow matching::
+
+   FLEX_PARSER_PROFILE_ENABLE=3
+
 Prerequisites
 -------------
 
@@ -1314,3 +1326,31 @@ ConnectX-4/ConnectX-5/ConnectX-6/BlueField devices managed by librte_pmd_mlx5.
       Port 3 Link Up - speed 10000 Mbps - full-duplex
       Done
       testpmd>
+
+How to dump flows
+-----------------
+
+This section demonstrates how to dump flows. Currently, it's possible to dump
+all flows with assistance of external tools.
+
+#. 2 ways to get flow raw file:
+
+   - Using testpmd CLI:
+
+   .. code-block:: console
+
+       testpmd> flow dump <port> <output_file>
+
+   - call rte_flow_dev_dump api:
+
+   .. code-block:: console
+
+       rte_flow_dev_dump(port, file, NULL);
+
+#. Dump human-readable flows from raw file:
+
+   Get flow parsing tool from: https://github.com/Mellanox/mlx_steering_dump
+
+   .. code-block:: console
+
+       mlx_steering_dump.py -f <output_file>

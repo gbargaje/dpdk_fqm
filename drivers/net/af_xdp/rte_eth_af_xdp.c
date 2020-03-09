@@ -480,10 +480,7 @@ af_xdp_tx_zc(void *queue, struct rte_mbuf **bufs, uint16_t nb_pkts)
 		tx_bytes += mbuf->pkt_len;
 	}
 
-#if defined(XDP_USE_NEED_WAKEUP)
-	if (xsk_ring_prod__needs_wakeup(&txq->tx))
-#endif
-		kick_tx(txq);
+	kick_tx(txq);
 
 out:
 	xsk_ring_prod__submit(&txq->tx, count);
@@ -812,7 +809,7 @@ xsk_umem_info *xdp_umem_configure(struct pmd_internals *internals,
 	umem->buf_ring = rte_ring_create(ring_name,
 					 ETH_AF_XDP_NUM_BUFFERS,
 					 rte_socket_id(),
-					 0x0);
+					 RING_F_SP_ENQ | RING_F_SC_DEQ);
 	if (umem->buf_ring == NULL) {
 		AF_XDP_LOG(ERR, "Failed to create rte_ring\n");
 		goto err;

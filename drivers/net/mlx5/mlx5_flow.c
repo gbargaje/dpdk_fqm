@@ -236,6 +236,7 @@ static const struct rte_flow_ops mlx5_flow_ops = {
 	.flush = mlx5_flow_flush,
 	.isolate = mlx5_flow_isolate,
 	.query = mlx5_flow_query,
+	.dev_dump = mlx5_flow_dev_dump,
 };
 
 /* Convert FDIR request to Generic flow. */
@@ -317,6 +318,10 @@ static struct mlx5_flow_tunnel_info tunnels_info[] = {
 	{
 		.tunnel = MLX5_FLOW_LAYER_IPV6_ENCAP,
 		.ptype = RTE_PTYPE_TUNNEL_IP,
+	},
+	{
+		.tunnel = MLX5_FLOW_LAYER_GTP,
+		.ptype = RTE_PTYPE_TUNNEL_GTPU,
 	},
 };
 
@@ -1150,6 +1155,18 @@ mlx5_flow_validate_action_rss(const struct rte_flow_action *action,
 					  &rss->types,
 					  "some RSS protocols are not"
 					  " supported");
+	if ((rss->types & (ETH_RSS_L3_SRC_ONLY | ETH_RSS_L3_DST_ONLY)) &&
+	    !(rss->types & ETH_RSS_IP))
+		return rte_flow_error_set(error, EINVAL,
+					  RTE_FLOW_ERROR_TYPE_ACTION_CONF, NULL,
+					  "L3 partial RSS requested but L3 RSS"
+					  " type not specified");
+	if ((rss->types & (ETH_RSS_L4_SRC_ONLY | ETH_RSS_L4_DST_ONLY)) &&
+	    !(rss->types & (ETH_RSS_UDP | ETH_RSS_TCP)))
+		return rte_flow_error_set(error, EINVAL,
+					  RTE_FLOW_ERROR_TYPE_ACTION_CONF, NULL,
+					  "L4 partial RSS requested but L4 RSS"
+					  " type not specified");
 	if (!priv->rxqs_n)
 		return rte_flow_error_set(error, EINVAL,
 					  RTE_FLOW_ERROR_TYPE_ACTION_CONF,
@@ -4025,7 +4042,7 @@ flow_create_split_meter(struct rte_eth_dev *dev,
 			sfx_items++;
 		}
 		sfx_items->type = RTE_FLOW_ITEM_TYPE_END;
-		sfx_items -= METER_SUFFIX_ITEM;
+		sfx_items -= sfx_port_id_item ? 2 : 1;
 		/* Setting the sfx group atrr. */
 		sfx_attr.group = sfx_attr.transfer ?
 				(MLX5_FLOW_TABLE_LEVEL_SUFFIX - 1) :
@@ -5666,4 +5683,27 @@ mlx5_flow_discover_mreg_c(struct rte_eth_dev *dev)
 	for (; n < MLX5_MREG_C_NUM; ++n)
 		config->flow_mreg_c[n] = REG_NONE;
 	return 0;
+}
+
+/**
+ * Dump flow raw hw data to file
+ *
+ * @param[in] dev
+ *    The pointer to Ethernet device.
+ * @param[in] file
+ *   A pointer to a file for output.
+ * @param[out] error
+ *   Perform verbose error reporting if not NULL. PMDs initialize this
+ *   structure in case of error only.
+ * @return
+ *   0 on success, a nagative value otherwise.
+ */
+int
+mlx5_flow_dev_dump(struct rte_eth_dev *dev,
+		   FILE *file,
+		   struct rte_flow_error *error __rte_unused)
+{
+	struct mlx5_priv *priv = dev->data->dev_private;
+
+	return mlx5_devx_cmd_flow_dump(priv->sh, file);
 }

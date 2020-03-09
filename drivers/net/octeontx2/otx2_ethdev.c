@@ -18,7 +18,8 @@ nix_get_rx_offload_capa(struct otx2_eth_dev *dev)
 {
 	uint64_t capa = NIX_RX_OFFLOAD_CAPA;
 
-	if (otx2_dev_is_vf(dev))
+	if (otx2_dev_is_vf(dev) ||
+	    dev->npc_flow.switch_header_type == OTX2_PRIV_FLAGS_HIGIG)
 		capa &= ~DEV_RX_OFFLOAD_TIMESTAMP;
 
 	return capa;
@@ -204,7 +205,7 @@ cgx_intlbk_enable(struct otx2_eth_dev *dev, bool en)
 {
 	struct otx2_mbox *mbox = dev->mbox;
 
-	if (otx2_dev_is_vf_or_sdp(dev))
+	if (en && otx2_dev_is_vf_or_sdp(dev))
 		return -ENOTSUP;
 
 	if (en)
@@ -1639,6 +1640,12 @@ otx2_nix_configure(struct rte_eth_dev *eth_dev)
 	if (rc) {
 		otx2_err("Failed to init nix_lf rc=%d", rc);
 		goto fail_offloads;
+	}
+
+	if (dev->ptp_en &&
+	    dev->npc_flow.switch_header_type == OTX2_PRIV_FLAGS_HIGIG) {
+		otx2_err("Both PTP and switch header enabled");
+		goto free_nix_lf;
 	}
 
 	rc = nix_lf_switch_header_type_enable(dev);

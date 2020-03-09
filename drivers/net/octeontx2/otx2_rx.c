@@ -130,16 +130,22 @@ nix_recv_pkts_vector(void *rx_queue, struct rte_mbuf **rx_pkts,
 	const uintptr_t desc = rxq->desc;
 	uint8x16_t f0, f1, f2, f3;
 	uint32_t head = rxq->head;
+	uint16_t pkts_left;
 
 	pkts = nix_rx_nb_pkts(rxq, wdata, pkts, qmask);
+	pkts_left = pkts & (NIX_DESCS_PER_LOOP - 1);
+
 	/* Packets has to be floor-aligned to NIX_DESCS_PER_LOOP */
 	pkts = RTE_ALIGN_FLOOR(pkts, NIX_DESCS_PER_LOOP);
 
 	while (packets < pkts) {
-		/* Get the CQ pointers, since the ring size is multiple of
-		 * 4, We can avoid checking the wrap around of head
-		 * value after the each access unlike scalar version.
-		 */
+		/* Exit loop if head is about to wrap and become unaligned */
+		if (((head + NIX_DESCS_PER_LOOP - 1) & qmask) <
+				NIX_DESCS_PER_LOOP) {
+			pkts_left += (pkts - packets);
+			break;
+		}
+
 		const uintptr_t cq0 = desc + CQE_SZ(head);
 
 		/* Prefetch N desc ahead */
@@ -184,17 +190,21 @@ nix_recv_pkts_vector(void *rx_queue, struct rte_mbuf **rx_pkts,
 		f3 = vqtbl1q_u8(cq3_w8, shuf_msk);
 
 		/* Load CQE word0 and word 1 */
-		uint64x2_t cq0_w0 = vld1q_u64((uint64_t *)(cq0 + CQE_SZ(0)));
-		uint64x2_t cq1_w0 = vld1q_u64((uint64_t *)(cq0 + CQE_SZ(1)));
-		uint64x2_t cq2_w0 = vld1q_u64((uint64_t *)(cq0 + CQE_SZ(2)));
-		uint64x2_t cq3_w0 = vld1q_u64((uint64_t *)(cq0 + CQE_SZ(3)));
+		uint64_t cq0_w0 = ((uint64_t *)(cq0 + CQE_SZ(0)))[0];
+		uint64_t cq0_w1 = ((uint64_t *)(cq0 + CQE_SZ(0)))[1];
+		uint64_t cq1_w0 = ((uint64_t *)(cq0 + CQE_SZ(1)))[0];
+		uint64_t cq1_w1 = ((uint64_t *)(cq0 + CQE_SZ(1)))[1];
+		uint64_t cq2_w0 = ((uint64_t *)(cq0 + CQE_SZ(2)))[0];
+		uint64_t cq2_w1 = ((uint64_t *)(cq0 + CQE_SZ(2)))[1];
+		uint64_t cq3_w0 = ((uint64_t *)(cq0 + CQE_SZ(3)))[0];
+		uint64_t cq3_w1 = ((uint64_t *)(cq0 + CQE_SZ(3)))[1];
 
 		if (flags & NIX_RX_OFFLOAD_RSS_F) {
 			/* Fill rss in the rx_descriptor_fields1 */
-			f0 = vsetq_lane_u32(vgetq_lane_u32(cq0_w0, 0), f0, 3);
-			f1 = vsetq_lane_u32(vgetq_lane_u32(cq1_w0, 0), f1, 3);
-			f2 = vsetq_lane_u32(vgetq_lane_u32(cq2_w0, 0), f2, 3);
-			f3 = vsetq_lane_u32(vgetq_lane_u32(cq3_w0, 0), f3, 3);
+			f0 = vsetq_lane_u32(cq0_w0, f0, 3);
+			f1 = vsetq_lane_u32(cq1_w0, f1, 3);
+			f2 = vsetq_lane_u32(cq2_w0, f2, 3);
+			f3 = vsetq_lane_u32(cq3_w0, f3, 3);
 			ol_flags0 = PKT_RX_RSS_HASH;
 			ol_flags1 = PKT_RX_RSS_HASH;
 			ol_flags2 = PKT_RX_RSS_HASH;
@@ -206,25 +216,21 @@ nix_recv_pkts_vector(void *rx_queue, struct rte_mbuf **rx_pkts,
 
 		if (flags & NIX_RX_OFFLOAD_PTYPE_F) {
 			/* Fill packet_type in the rx_descriptor_fields1 */
-			f0 = vsetq_lane_u32(nix_ptype_get(lookup_mem,
-					    vgetq_lane_u64(cq0_w0, 1)), f0, 0);
-			f1 = vsetq_lane_u32(nix_ptype_get(lookup_mem,
-					    vgetq_lane_u64(cq1_w0, 1)), f1, 0);
-			f2 = vsetq_lane_u32(nix_ptype_get(lookup_mem,
-					    vgetq_lane_u64(cq2_w0, 1)), f2, 0);
-			f3 = vsetq_lane_u32(nix_ptype_get(lookup_mem,
-					    vgetq_lane_u64(cq3_w0, 1)), f3, 0);
+			f0 = vsetq_lane_u32(nix_ptype_get(lookup_mem, cq0_w1),
+					    f0, 0);
+			f1 = vsetq_lane_u32(nix_ptype_get(lookup_mem, cq1_w1),
+					    f1, 0);
+			f2 = vsetq_lane_u32(nix_ptype_get(lookup_mem, cq2_w1),
+					    f2, 0);
+			f3 = vsetq_lane_u32(nix_ptype_get(lookup_mem, cq3_w1),
+					    f3, 0);
 		}
 
 		if (flags & NIX_RX_OFFLOAD_CHECKSUM_F) {
-			ol_flags0 |= nix_rx_olflags_get(lookup_mem,
-						vgetq_lane_u64(cq0_w0, 1));
-			ol_flags1 |= nix_rx_olflags_get(lookup_mem,
-						vgetq_lane_u64(cq1_w0, 1));
-			ol_flags2 |= nix_rx_olflags_get(lookup_mem,
-						vgetq_lane_u64(cq2_w0, 1));
-			ol_flags3 |= nix_rx_olflags_get(lookup_mem,
-						vgetq_lane_u64(cq3_w0, 1));
+			ol_flags0 |= nix_rx_olflags_get(lookup_mem, cq0_w1);
+			ol_flags1 |= nix_rx_olflags_get(lookup_mem, cq1_w1);
+			ol_flags2 |= nix_rx_olflags_get(lookup_mem, cq2_w1);
+			ol_flags3 |= nix_rx_olflags_get(lookup_mem, cq3_w1);
 		}
 
 		if (flags & NIX_RX_OFFLOAD_VLAN_STRIP_F) {
@@ -300,6 +306,10 @@ nix_recv_pkts_vector(void *rx_queue, struct rte_mbuf **rx_pkts,
 	rte_cio_wmb();
 	/* Free all the CQs that we've processed */
 	otx2_write64((rxq->wdata | packets), rxq->cq_door);
+
+	if (unlikely(pkts_left))
+		packets += nix_recv_pkts(rx_queue, &rx_pkts[packets],
+					 pkts_left, flags);
 
 	return packets;
 }

@@ -231,9 +231,10 @@ struct bnxt_pf_info {
 	uint8_t			evb_mode;
 };
 
-/* Max wait time is 10 * 100ms = 1s */
-#define BNXT_LINK_WAIT_CNT	10
-#define BNXT_LINK_WAIT_INTERVAL	100
+/* Max wait time for link up is 10s and link down is 500ms */
+#define BNXT_LINK_UP_WAIT_CNT	200
+#define BNXT_LINK_DOWN_WAIT_CNT	10
+#define BNXT_LINK_WAIT_INTERVAL	50
 struct bnxt_link_info {
 	uint32_t		phy_flags;
 	uint8_t			mac_type;
@@ -507,16 +508,14 @@ struct bnxt {
 #define BNXT_FLAG_STINGRAY		BIT(14)
 #define BNXT_FLAG_FW_RESET		BIT(15)
 #define BNXT_FLAG_FATAL_ERROR		BIT(16)
-#define BNXT_FLAG_FW_CAP_IF_CHANGE		BIT(17)
-#define BNXT_FLAG_IF_CHANGE_HOT_FW_RESET_DONE	BIT(18)
-#define BNXT_FLAG_FW_CAP_ERROR_RECOVERY		BIT(19)
-#define BNXT_FLAG_FW_HEALTH_CHECK_SCHEDULED	BIT(20)
-#define BNXT_FLAG_FW_CAP_ERR_RECOVER_RELOAD	BIT(21)
-#define BNXT_FLAG_EXT_STATS_SUPPORTED		BIT(22)
-#define BNXT_FLAG_NEW_RM			BIT(23)
-#define BNXT_FLAG_INIT_DONE			BIT(24)
-#define BNXT_FLAG_FW_CAP_ONE_STEP_TX_TS		BIT(25)
-#define BNXT_FLAG_ADV_FLOW_MGMT			BIT(26)
+#define BNXT_FLAG_IF_CHANGE_HOT_FW_RESET_DONE	BIT(17)
+#define BNXT_FLAG_FW_HEALTH_CHECK_SCHEDULED	BIT(18)
+#define BNXT_FLAG_EXT_STATS_SUPPORTED		BIT(19)
+#define BNXT_FLAG_NEW_RM			BIT(20)
+#define BNXT_FLAG_INIT_DONE			BIT(21)
+#define BNXT_FLAG_FW_CAP_ONE_STEP_TX_TS		BIT(22)
+#define BNXT_FLAG_ADV_FLOW_MGMT			BIT(23)
+#define BNXT_FLAG_RX_VECTOR_PKT_MODE		BIT(24)
 #define BNXT_PF(bp)		(!((bp)->flags & BNXT_FLAG_VF))
 #define BNXT_VF(bp)		((bp)->flags & BNXT_FLAG_VF)
 #define BNXT_NPAR(bp)		((bp)->port_partition_type)
@@ -529,6 +528,12 @@ struct bnxt {
 #define BNXT_STINGRAY(bp)	((bp)->flags & BNXT_FLAG_STINGRAY)
 #define BNXT_HAS_NQ(bp)		BNXT_CHIP_THOR(bp)
 #define BNXT_HAS_RING_GRPS(bp)	(!BNXT_CHIP_THOR(bp))
+
+	uint32_t		fw_cap;
+#define BNXT_FW_CAP_HOT_RESET		BIT(0)
+#define BNXT_FW_CAP_IF_CHANGE		BIT(1)
+#define BNXT_FW_CAP_ERROR_RECOVERY	BIT(2)
+#define BNXT_FW_CAP_ERR_RECOVER_RELOAD	BIT(3)
 
 	uint32_t		flow_flags;
 #define BNXT_FLOW_FLAG_L2_HDR_SRC_FILTER_EN	BIT(0)
@@ -650,10 +655,15 @@ struct bnxt {
 
 	/* Struct to hold adapter error recovery related info */
 	struct bnxt_error_recovery_info *recovery_info;
+#define BNXT_MARK_TABLE_SZ	(sizeof(uint32_t)  * 64 * 1024)
+/* TCAM and EM should be 16-bit only. Other modes not supported. */
+#define BNXT_FLOW_ID_MASK	0x0000ffff
+	uint32_t		*mark_table;
 };
 
 int bnxt_mtu_set_op(struct rte_eth_dev *eth_dev, uint16_t new_mtu);
-int bnxt_link_update_op(struct rte_eth_dev *eth_dev, int wait_to_complete);
+int bnxt_link_update(struct rte_eth_dev *eth_dev, int wait_to_complete,
+		     bool exp_link_status);
 int bnxt_rcv_msg_from_vf(struct bnxt *bp, uint16_t vf_id, void *msg);
 int is_bnxt_in_error(struct bnxt *bp);
 uint16_t bnxt_rss_ctxts(const struct bnxt *bp);

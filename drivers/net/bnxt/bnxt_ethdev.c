@@ -458,6 +458,10 @@ skip_cosq_cfg:
 	}
 	bnxt_print_link_info(bp->eth_dev);
 
+	bp->mark_table = rte_zmalloc("bnxt_mark_table", BNXT_MARK_TABLE_SZ, 0);
+	if (!bp->mark_table)
+		PMD_DRV_LOG(ERR, "Allocation of mark table failed\n");
+
 	return 0;
 
 err_free:
@@ -740,8 +744,10 @@ static int bnxt_scattered_rx(struct rte_eth_dev *eth_dev)
 }
 
 static eth_rx_burst_t
-bnxt_receive_function(__rte_unused struct rte_eth_dev *eth_dev)
+bnxt_receive_function(struct rte_eth_dev *eth_dev)
 {
+	struct bnxt *bp = eth_dev->data->dev_private;
+
 #ifdef RTE_ARCH_X86
 #ifndef RTE_LIBRTE_IEEE1588
 	/*
@@ -762,6 +768,7 @@ bnxt_receive_function(__rte_unused struct rte_eth_dev *eth_dev)
 		DEV_RX_OFFLOAD_VLAN_FILTER))) {
 		PMD_DRV_LOG(INFO, "Using vector mode receive for port %d\n",
 			    eth_dev->data->port_id);
+		bp->flags |= BNXT_FLAG_RX_VECTOR_PKT_MODE;
 		return bnxt_recv_pkts_vec;
 	}
 	PMD_DRV_LOG(INFO, "Vector mode receive disabled for port %d\n",
@@ -773,6 +780,7 @@ bnxt_receive_function(__rte_unused struct rte_eth_dev *eth_dev)
 		    eth_dev->data->dev_conf.rxmode.offloads);
 #endif
 #endif
+	bp->flags &= ~BNXT_FLAG_RX_VECTOR_PKT_MODE;
 	return bnxt_recv_pkts;
 }
 
@@ -856,7 +864,7 @@ static int bnxt_dev_start_op(struct rte_eth_dev *eth_dev)
 
 	eth_dev->data->scattered_rx = bnxt_scattered_rx(eth_dev);
 
-	bnxt_link_update_op(eth_dev, 1);
+	bnxt_link_update(eth_dev, 1, ETH_LINK_UP);
 
 	if (rx_offloads & DEV_RX_OFFLOAD_VLAN_FILTER)
 		vlan_mask |= ETH_VLAN_FILTER_MASK;
@@ -940,7 +948,7 @@ static void bnxt_dev_stop_op(struct rte_eth_dev *eth_dev)
 	 * During reset recovery, there is no need to wait
 	 */
 	if (!is_bnxt_in_error(bp))
-		rte_delay_ms(BNXT_LINK_WAIT_INTERVAL * 2);
+		bnxt_link_update(eth_dev, 1, ETH_LINK_DOWN);
 
 	/* Clean queue intr-vector mapping */
 	rte_intr_efd_disable(intr_handle);
@@ -956,6 +964,8 @@ static void bnxt_dev_stop_op(struct rte_eth_dev *eth_dev)
 	bnxt_int_handler(eth_dev);
 	bnxt_shutdown_nic(bp);
 	bnxt_hwrm_if_change(bp, 0);
+	memset(bp->mark_table, 0, BNXT_MARK_TABLE_SZ);
+	bp->flags &= ~BNXT_FLAG_RX_VECTOR_PKT_MODE;
 	bp->dev_stopped = 1;
 	bp->rx_cosq_cnt = 0;
 }
@@ -975,6 +985,9 @@ static void bnxt_dev_close_op(struct rte_eth_dev *eth_dev)
 		rte_free(bp->grp_info);
 		bp->grp_info = NULL;
 	}
+
+	rte_free(bp->mark_table);
+	bp->mark_table = NULL;
 
 	bnxt_dev_uninit(eth_dev);
 }
@@ -1007,8 +1020,6 @@ static void bnxt_mac_addr_remove_op(struct rte_eth_dev *eth_dev,
 				STAILQ_REMOVE(&vnic->filter, filter,
 						bnxt_filter_info, next);
 				bnxt_hwrm_clear_l2_filter(bp, filter);
-				filter->mac_index = INVALID_MAC_INDEX;
-				memset(&filter->l2_addr, 0, RTE_ETHER_ADDR_LEN);
 				bnxt_free_filter(bp, filter);
 			}
 			filter = temp_filter;
@@ -1055,7 +1066,6 @@ static int bnxt_add_mac_filter(struct bnxt *bp, struct bnxt_vnic_info *vnic,
 		else
 			STAILQ_INSERT_TAIL(&vnic->filter, filter, next);
 	} else {
-		memset(&filter->l2_addr, 0, RTE_ETHER_ADDR_LEN);
 		bnxt_free_filter(bp, filter);
 	}
 
@@ -1089,12 +1099,14 @@ static int bnxt_mac_addr_add_op(struct rte_eth_dev *eth_dev,
 	return rc;
 }
 
-int bnxt_link_update_op(struct rte_eth_dev *eth_dev, int wait_to_complete)
+int bnxt_link_update(struct rte_eth_dev *eth_dev, int wait_to_complete,
+		     bool exp_link_status)
 {
 	int rc = 0;
 	struct bnxt *bp = eth_dev->data->dev_private;
 	struct rte_eth_link new;
-	unsigned int cnt = BNXT_LINK_WAIT_CNT;
+	int cnt = exp_link_status ? BNXT_LINK_UP_WAIT_CNT :
+		  BNXT_LINK_DOWN_WAIT_CNT;
 
 	rc = is_bnxt_in_error(bp);
 	if (rc)
@@ -1112,7 +1124,7 @@ int bnxt_link_update_op(struct rte_eth_dev *eth_dev, int wait_to_complete)
 			goto out;
 		}
 
-		if (!wait_to_complete || new.link_status)
+		if (!wait_to_complete || new.link_status == exp_link_status)
 			break;
 
 		rte_delay_ms(BNXT_LINK_WAIT_INTERVAL);
@@ -1132,6 +1144,12 @@ out:
 	}
 
 	return rc;
+}
+
+static int bnxt_link_update_op(struct rte_eth_dev *eth_dev,
+			       int wait_to_complete)
+{
+	return bnxt_link_update(eth_dev, wait_to_complete, ETH_LINK_UP);
 }
 
 static int bnxt_promiscuous_enable_op(struct rte_eth_dev *eth_dev)
@@ -1271,7 +1289,7 @@ static int bnxt_reta_update_op(struct rte_eth_dev *eth_dev,
 {
 	struct bnxt *bp = eth_dev->data->dev_private;
 	struct rte_eth_conf *dev_conf = &bp->eth_dev->data->dev_conf;
-	struct bnxt_vnic_info *vnic = &bp->vnic_info[0];
+	struct bnxt_vnic_info *vnic = BNXT_GET_DEFAULT_VNIC(bp);
 	uint16_t tbl_size = bnxt_rss_hash_tbl_size(bp);
 	uint16_t idx, sft;
 	int i, rc;
@@ -1328,7 +1346,7 @@ static int bnxt_reta_query_op(struct rte_eth_dev *eth_dev,
 			      uint16_t reta_size)
 {
 	struct bnxt *bp = eth_dev->data->dev_private;
-	struct bnxt_vnic_info *vnic = &bp->vnic_info[0];
+	struct bnxt_vnic_info *vnic = BNXT_GET_DEFAULT_VNIC(bp);
 	uint16_t tbl_size = bnxt_rss_hash_tbl_size(bp);
 	uint16_t idx, sft, i;
 	int rc;
@@ -1402,7 +1420,7 @@ static int bnxt_rss_hash_update_op(struct rte_eth_dev *eth_dev,
 	memcpy(&bp->rss_conf, rss_conf, sizeof(*rss_conf));
 
 	/* Update the default RSS VNIC(s) */
-	vnic = &bp->vnic_info[0];
+	vnic = BNXT_GET_DEFAULT_VNIC(bp);
 	vnic->hash_type = bnxt_rte_to_hwrm_hash_types(rss_conf->rss_hf);
 
 	/*
@@ -1428,7 +1446,7 @@ static int bnxt_rss_hash_conf_get_op(struct rte_eth_dev *eth_dev,
 				     struct rte_eth_rss_conf *rss_conf)
 {
 	struct bnxt *bp = eth_dev->data->dev_private;
-	struct bnxt_vnic_info *vnic = &bp->vnic_info[0];
+	struct bnxt_vnic_info *vnic = BNXT_GET_DEFAULT_VNIC(bp);
 	int len, rc;
 	uint32_t hash_types;
 
@@ -1781,7 +1799,6 @@ static int bnxt_add_vlan_filter(struct bnxt *bp, uint16_t vlan_id)
 		/* Free the newly allocated filter as we were
 		 * not able to create the filter in hardware.
 		 */
-		filter->fw_l2_filter_id = UINT64_MAX;
 		bnxt_free_filter(bp, filter);
 		return rc;
 	}
@@ -1831,7 +1848,6 @@ static int bnxt_del_dflt_mac_filter(struct bnxt *bp,
 				STAILQ_REMOVE(&vnic->filter, filter,
 					      bnxt_filter_info, next);
 				bnxt_free_filter(bp, filter);
-				filter->fw_l2_filter_id = UINT64_MAX;
 			}
 			return rc;
 		}
@@ -1964,7 +1980,7 @@ bnxt_set_default_mac_addr_op(struct rte_eth_dev *dev,
 {
 	struct bnxt *bp = dev->data->dev_private;
 	/* Default Filter is tied to VNIC 0 */
-	struct bnxt_vnic_info *vnic = &bp->vnic_info[0];
+	struct bnxt_vnic_info *vnic = BNXT_GET_DEFAULT_VNIC(bp);
 	struct bnxt_filter_info *filter;
 	int rc;
 
@@ -2378,7 +2394,7 @@ bnxt_match_and_validate_ether_filter(struct bnxt *bp,
 		goto exit;
 	}
 
-	vnic0 = &bp->vnic_info[0];
+	vnic0 = BNXT_GET_DEFAULT_VNIC(bp);
 	vnic = &bp->vnic_info[efilter->queue];
 	if (vnic == NULL) {
 		PMD_DRV_LOG(ERR, "Invalid queue %d\n", efilter->queue);
@@ -2437,7 +2453,7 @@ bnxt_ethertype_filter(struct rte_eth_dev *dev,
 		return -EINVAL;
 	}
 
-	vnic0 = &bp->vnic_info[0];
+	vnic0 = BNXT_GET_DEFAULT_VNIC(bp);
 	vnic = &bp->vnic_info[efilter->queue];
 
 	switch (filter_op) {
@@ -2652,7 +2668,7 @@ bnxt_cfg_ntuple_filter(struct bnxt *bp,
 		goto free_filter;
 
 	vnic = &bp->vnic_info[nfilter->queue];
-	vnic0 = &bp->vnic_info[0];
+	vnic0 = BNXT_GET_DEFAULT_VNIC(bp);
 	filter1 = STAILQ_FIRST(&vnic0->filter);
 	if (filter1 == NULL) {
 		ret = -EINVAL;
@@ -2705,14 +2721,11 @@ bnxt_cfg_ntuple_filter(struct bnxt *bp,
 
 		STAILQ_REMOVE(&vnic->filter, mfilter, bnxt_filter_info, next);
 		bnxt_free_filter(bp, mfilter);
-		mfilter->fw_l2_filter_id = -1;
 		bnxt_free_filter(bp, bfilter);
-		bfilter->fw_l2_filter_id = -1;
 	}
 
 	return 0;
 free_filter:
-	bfilter->fw_l2_filter_id = -1;
 	bnxt_free_filter(bp, bfilter);
 	return ret;
 }
@@ -2945,7 +2958,7 @@ bnxt_parse_fdir_filter(struct bnxt *bp,
 		return -EINVAL;
 	}
 
-	vnic0 = &bp->vnic_info[0];
+	vnic0 = BNXT_GET_DEFAULT_VNIC(bp);
 	vnic = &bp->vnic_info[fdir->action.rx_queue];
 	if (vnic == NULL) {
 		PMD_DRV_LOG(ERR, "Invalid queue %d\n", fdir->action.rx_queue);
@@ -3110,7 +3123,6 @@ bnxt_fdir_filter(struct rte_eth_dev *dev,
 			STAILQ_REMOVE(&vnic->filter, match,
 				      bnxt_filter_info, next);
 			bnxt_free_filter(bp, match);
-			filter->fw_l2_filter_id = -1;
 			bnxt_free_filter(bp, filter);
 		}
 		break;
@@ -3143,13 +3155,12 @@ bnxt_fdir_filter(struct rte_eth_dev *dev,
 	return ret;
 
 free_filter:
-	filter->fw_l2_filter_id = -1;
 	bnxt_free_filter(bp, filter);
 	return ret;
 }
 
 static int
-bnxt_filter_ctrl_op(struct rte_eth_dev *dev __rte_unused,
+bnxt_filter_ctrl_op(struct rte_eth_dev *dev,
 		    enum rte_filter_type filter_type,
 		    enum rte_filter_op filter_op, void *arg)
 {
@@ -3796,6 +3807,71 @@ static void bnxt_dev_cleanup(struct bnxt *bp)
 	bnxt_uninit_resources(bp, true);
 }
 
+static int bnxt_restore_vlan_filters(struct bnxt *bp)
+{
+	struct rte_eth_dev *dev = bp->eth_dev;
+	struct rte_vlan_filter_conf *vfc;
+	int vidx, vbit, rc;
+	uint16_t vlan_id;
+
+	for (vlan_id = 1; vlan_id <= RTE_ETHER_MAX_VLAN_ID; vlan_id++) {
+		vfc = &dev->data->vlan_filter_conf;
+		vidx = vlan_id / 64;
+		vbit = vlan_id % 64;
+
+		/* Each bit corresponds to a VLAN id */
+		if (vfc->ids[vidx] & (UINT64_C(1) << vbit)) {
+			rc = bnxt_add_vlan_filter(bp, vlan_id);
+			if (rc)
+				return rc;
+		}
+	}
+
+	return 0;
+}
+
+static int bnxt_restore_mac_filters(struct bnxt *bp)
+{
+	struct rte_eth_dev *dev = bp->eth_dev;
+	struct rte_eth_dev_info dev_info;
+	struct rte_ether_addr *addr;
+	uint64_t pool_mask;
+	uint32_t pool = 0;
+	uint16_t i;
+	int rc;
+
+	if (BNXT_VF(bp) & !BNXT_VF_IS_TRUSTED(bp))
+		return 0;
+
+	rc = bnxt_dev_info_get_op(dev, &dev_info);
+	if (rc)
+		return rc;
+
+	/* replay MAC address configuration */
+	for (i = 1; i < dev_info.max_mac_addrs; i++) {
+		addr = &dev->data->mac_addrs[i];
+
+		/* skip zero address */
+		if (rte_is_zero_ether_addr(addr))
+			continue;
+
+		pool = 0;
+		pool_mask = dev->data->mac_pool_sel[i];
+
+		do {
+			if (pool_mask & 1ULL) {
+				rc = bnxt_mac_addr_add_op(dev, addr, i, pool);
+				if (rc)
+					return rc;
+			}
+			pool_mask >>= 1;
+			pool++;
+		} while (pool_mask);
+	}
+
+	return 0;
+}
+
 static int bnxt_restore_filters(struct bnxt *bp)
 {
 	struct rte_eth_dev *dev = bp->eth_dev;
@@ -3806,6 +3882,11 @@ static int bnxt_restore_filters(struct bnxt *bp)
 	if (dev->data->promiscuous)
 		ret = bnxt_promiscuous_enable_op(dev);
 
+	ret = bnxt_restore_mac_filters(bp);
+	if (ret)
+		return ret;
+
+	ret = bnxt_restore_vlan_filters(bp);
 	/* TODO restore other filters as well */
 	return ret;
 }
@@ -4028,49 +4109,60 @@ static void bnxt_cancel_fw_health_check(struct bnxt *bp)
 	bp->flags &= ~BNXT_FLAG_FW_HEALTH_CHECK_SCHEDULED;
 }
 
-static bool bnxt_vf_pciid(uint16_t id)
+static bool bnxt_vf_pciid(uint16_t device_id)
 {
-	if (id == BROADCOM_DEV_ID_57304_VF ||
-	    id == BROADCOM_DEV_ID_57406_VF ||
-	    id == BROADCOM_DEV_ID_5731X_VF ||
-	    id == BROADCOM_DEV_ID_5741X_VF ||
-	    id == BROADCOM_DEV_ID_57414_VF ||
-	    id == BROADCOM_DEV_ID_STRATUS_NIC_VF1 ||
-	    id == BROADCOM_DEV_ID_STRATUS_NIC_VF2 ||
-	    id == BROADCOM_DEV_ID_58802_VF ||
-	    id == BROADCOM_DEV_ID_57500_VF1 ||
-	    id == BROADCOM_DEV_ID_57500_VF2)
+	switch (device_id) {
+	case BROADCOM_DEV_ID_57304_VF:
+	case BROADCOM_DEV_ID_57406_VF:
+	case BROADCOM_DEV_ID_5731X_VF:
+	case BROADCOM_DEV_ID_5741X_VF:
+	case BROADCOM_DEV_ID_57414_VF:
+	case BROADCOM_DEV_ID_STRATUS_NIC_VF1:
+	case BROADCOM_DEV_ID_STRATUS_NIC_VF2:
+	case BROADCOM_DEV_ID_58802_VF:
+	case BROADCOM_DEV_ID_57500_VF1:
+	case BROADCOM_DEV_ID_57500_VF2:
+		/* FALLTHROUGH */
 		return true;
-	return false;
+	default:
+		return false;
+	}
 }
 
-static bool bnxt_thor_device(uint16_t id)
+static bool bnxt_thor_device(uint16_t device_id)
 {
-	if (id == BROADCOM_DEV_ID_57508 ||
-	    id == BROADCOM_DEV_ID_57504 ||
-	    id == BROADCOM_DEV_ID_57502 ||
-	    id == BROADCOM_DEV_ID_57508_MF1 ||
-	    id == BROADCOM_DEV_ID_57504_MF1 ||
-	    id == BROADCOM_DEV_ID_57502_MF1 ||
-	    id == BROADCOM_DEV_ID_57508_MF2 ||
-	    id == BROADCOM_DEV_ID_57504_MF2 ||
-	    id == BROADCOM_DEV_ID_57502_MF2 ||
-	    id == BROADCOM_DEV_ID_57500_VF1 ||
-	    id == BROADCOM_DEV_ID_57500_VF2)
+	switch (device_id) {
+	case BROADCOM_DEV_ID_57508:
+	case BROADCOM_DEV_ID_57504:
+	case BROADCOM_DEV_ID_57502:
+	case BROADCOM_DEV_ID_57508_MF1:
+	case BROADCOM_DEV_ID_57504_MF1:
+	case BROADCOM_DEV_ID_57502_MF1:
+	case BROADCOM_DEV_ID_57508_MF2:
+	case BROADCOM_DEV_ID_57504_MF2:
+	case BROADCOM_DEV_ID_57502_MF2:
+	case BROADCOM_DEV_ID_57500_VF1:
+	case BROADCOM_DEV_ID_57500_VF2:
+		/* FALLTHROUGH */
 		return true;
-
-	return false;
+	default:
+		return false;
+	}
 }
 
 bool bnxt_stratus_device(struct bnxt *bp)
 {
-	uint16_t id = bp->pdev->id.device_id;
+	uint16_t device_id = bp->pdev->id.device_id;
 
-	if (id == BROADCOM_DEV_ID_STRATUS_NIC ||
-	    id == BROADCOM_DEV_ID_STRATUS_NIC_VF1 ||
-	    id == BROADCOM_DEV_ID_STRATUS_NIC_VF2)
+	switch (device_id) {
+	case BROADCOM_DEV_ID_STRATUS_NIC:
+	case BROADCOM_DEV_ID_STRATUS_NIC_VF1:
+	case BROADCOM_DEV_ID_STRATUS_NIC_VF2:
+		/* FALLTHROUGH */
 		return true;
-	return false;
+	default:
+		return false;
+	}
 }
 
 static int bnxt_init_board(struct rte_eth_dev *eth_dev)
@@ -4092,7 +4184,7 @@ static int bnxt_init_board(struct rte_eth_dev *eth_dev)
 	return 0;
 }
 
-static int bnxt_alloc_ctx_mem_blk(__rte_unused struct bnxt *bp,
+static int bnxt_alloc_ctx_mem_blk(struct bnxt *bp,
 				  struct bnxt_ctx_pg_info *ctx_pg,
 				  uint32_t mem_size,
 				  const char *suffix,
@@ -4546,6 +4638,8 @@ static int bnxt_init_fw(struct bnxt *bp)
 	uint16_t mtu;
 	int rc = 0;
 
+	bp->fw_cap = 0;
+
 	rc = bnxt_hwrm_ver_get(bp);
 	if (rc)
 		return rc;
@@ -4581,7 +4675,7 @@ static int bnxt_init_fw(struct bnxt *bp)
 	/* Get the adapter error recovery support info */
 	rc = bnxt_hwrm_error_recovery_qcfg(bp);
 	if (rc)
-		bp->flags &= ~BNXT_FLAG_FW_CAP_ERROR_RECOVERY;
+		bp->fw_cap &= ~BNXT_FW_CAP_ERROR_RECOVERY;
 
 	bnxt_hwrm_port_led_qcaps(bp);
 
@@ -4694,6 +4788,7 @@ bnxt_dev_init(struct rte_eth_dev *eth_dev)
 	bp = eth_dev->data->dev_private;
 
 	bp->dev_stopped = 1;
+	bp->flags &= ~BNXT_FLAG_RX_VECTOR_PKT_MODE;
 
 	if (bnxt_vf_pciid(pci_dev->id.device_id))
 		bp->flags |= BNXT_FLAG_VF;

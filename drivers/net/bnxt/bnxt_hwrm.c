@@ -363,10 +363,11 @@ int bnxt_hwrm_cfa_vlan_antispoof_cfg(struct bnxt *bp, uint16_t fid,
 }
 
 int bnxt_hwrm_clear_l2_filter(struct bnxt *bp,
-			   struct bnxt_filter_info *filter)
+			     struct bnxt_filter_info *filter)
 {
 	int rc = 0;
 	struct bnxt_filter_info *l2_filter = filter;
+	struct bnxt_vnic_info *vnic = NULL;
 	struct hwrm_cfa_l2_filter_free_input req = {.req_type = 0 };
 	struct hwrm_cfa_l2_filter_free_output *resp = bp->hwrm_cmd_resp_addr;
 
@@ -378,6 +379,9 @@ int bnxt_hwrm_clear_l2_filter(struct bnxt *bp,
 
 	PMD_DRV_LOG(DEBUG, "filter: %p l2_filter: %p ref_cnt: %d\n",
 		    filter, l2_filter, l2_filter->l2_ref_cnt);
+
+	if (l2_filter->l2_ref_cnt == 0)
+		return 0;
 
 	if (l2_filter->l2_ref_cnt > 0)
 		l2_filter->l2_ref_cnt--;
@@ -395,6 +399,14 @@ int bnxt_hwrm_clear_l2_filter(struct bnxt *bp,
 	HWRM_UNLOCK();
 
 	filter->fw_l2_filter_id = UINT64_MAX;
+	if (l2_filter->l2_ref_cnt == 0) {
+		vnic = l2_filter->vnic;
+		if (vnic) {
+			STAILQ_REMOVE(&vnic->filter, l2_filter,
+				      bnxt_filter_info, next);
+			bnxt_free_filter(bp, l2_filter);
+		}
+	}
 
 	return 0;
 }
@@ -473,6 +485,7 @@ int bnxt_hwrm_set_l2_filter(struct bnxt *bp,
 	HWRM_CHECK_RESULT();
 
 	filter->fw_l2_filter_id = rte_le_to_cpu_64(resp->l2_filter_id);
+	filter->flow_id = rte_le_to_cpu_32(resp->flow_id);
 	HWRM_UNLOCK();
 
 	return rc;
@@ -661,16 +674,15 @@ static int __bnxt_hwrm_func_qcaps(struct bnxt *bp)
 		bp->flags |= BNXT_FLAG_EXT_STATS_SUPPORTED;
 
 	if (flags & HWRM_FUNC_QCAPS_OUTPUT_FLAGS_ERROR_RECOVERY_CAPABLE) {
-		bp->flags |= BNXT_FLAG_FW_CAP_ERROR_RECOVERY;
+		bp->fw_cap |= BNXT_FW_CAP_ERROR_RECOVERY;
 		PMD_DRV_LOG(DEBUG, "Adapter Error recovery SUPPORTED\n");
-	} else {
-		bp->flags &= ~BNXT_FLAG_FW_CAP_ERROR_RECOVERY;
 	}
 
 	if (flags & HWRM_FUNC_QCAPS_OUTPUT_FLAGS_ERR_RECOVER_RELOAD)
-		bp->flags |= BNXT_FLAG_FW_CAP_ERR_RECOVER_RELOAD;
-	else
-		bp->flags &= ~BNXT_FLAG_FW_CAP_ERR_RECOVER_RELOAD;
+		bp->fw_cap |= BNXT_FW_CAP_ERR_RECOVER_RELOAD;
+
+	if (flags & HWRM_FUNC_QCAPS_OUTPUT_FLAGS_HOT_RESET_CAPABLE)
+		bp->fw_cap |= BNXT_FW_CAP_HOT_RESET;
 
 	HWRM_UNLOCK();
 
@@ -756,8 +768,9 @@ int bnxt_hwrm_func_driver_register(struct bnxt *bp)
 	if (bp->flags & BNXT_FLAG_REGISTERED)
 		return 0;
 
-	flags = HWRM_FUNC_DRV_RGTR_INPUT_FLAGS_HOT_RESET_SUPPORT;
-	if (bp->flags & BNXT_FLAG_FW_CAP_ERROR_RECOVERY)
+	if (bp->fw_cap & BNXT_FW_CAP_HOT_RESET)
+		flags = HWRM_FUNC_DRV_RGTR_INPUT_FLAGS_HOT_RESET_SUPPORT;
+	if (bp->fw_cap & BNXT_FW_CAP_ERROR_RECOVERY)
 		flags |= HWRM_FUNC_DRV_RGTR_INPUT_FLAGS_ERROR_RECOVERY_SUPPORT;
 
 	/* PFs and trusted VFs should indicate the support of the
@@ -797,7 +810,7 @@ int bnxt_hwrm_func_driver_register(struct bnxt *bp)
 				 ASYNC_CMPL_EVENT_ID_LINK_SPEED_CFG_CHANGE |
 				 ASYNC_CMPL_EVENT_ID_LINK_SPEED_CHANGE |
 				 ASYNC_CMPL_EVENT_ID_RESET_NOTIFY);
-	if (bp->flags & BNXT_FLAG_FW_CAP_ERROR_RECOVERY)
+	if (bp->fw_cap & BNXT_FW_CAP_ERROR_RECOVERY)
 		req.async_event_fwd[0] |=
 			rte_cpu_to_le_32(ASYNC_CMPL_EVENT_ID_ERROR_RECOVERY);
 	req.async_event_fwd[1] |=
@@ -810,7 +823,7 @@ int bnxt_hwrm_func_driver_register(struct bnxt *bp)
 
 	flags = rte_le_to_cpu_32(resp->flags);
 	if (flags & HWRM_FUNC_DRV_RGTR_OUTPUT_FLAGS_IF_CHANGE_SUPPORTED)
-		bp->flags |= BNXT_FLAG_FW_CAP_IF_CHANGE;
+		bp->fw_cap |= BNXT_FW_CAP_IF_CHANGE;
 
 	HWRM_UNLOCK();
 
@@ -1210,6 +1223,35 @@ static int bnxt_hwrm_port_phy_qcfg(struct bnxt *bp,
 	return rc;
 }
 
+static bool bnxt_find_lossy_profile(struct bnxt *bp)
+{
+	int i = 0;
+
+	for (i = BNXT_COS_QUEUE_COUNT - 1; i >= 0; i--) {
+		if (bp->tx_cos_queue[i].profile ==
+		    HWRM_QUEUE_SERVICE_PROFILE_LOSSY) {
+			bp->tx_cosq_id[0] = bp->tx_cos_queue[i].id;
+			return true;
+		}
+	}
+	return false;
+}
+
+static void bnxt_find_first_valid_profile(struct bnxt *bp)
+{
+	int i = 0;
+
+	for (i = BNXT_COS_QUEUE_COUNT - 1; i >= 0; i--) {
+		if (bp->tx_cos_queue[i].profile !=
+		    HWRM_QUEUE_SERVICE_PROFILE_UNKNOWN &&
+		    bp->tx_cos_queue[i].id !=
+		    HWRM_QUEUE_SERVICE_PROFILE_UNKNOWN) {
+			bp->tx_cosq_id[0] = bp->tx_cos_queue[i].id;
+			break;
+		}
+	}
+}
+
 int bnxt_hwrm_queue_qportcfg(struct bnxt *bp)
 {
 	int rc = 0;
@@ -1269,14 +1311,13 @@ get_rx_info:
 						bp->tx_cos_queue[i].id;
 			}
 		} else {
-			for (i = BNXT_COS_QUEUE_COUNT - 1; i >= 0; i--) {
-				if (bp->tx_cos_queue[i].profile ==
-					HWRM_QUEUE_SERVICE_PROFILE_LOSSY) {
-					bp->tx_cosq_id[0] =
-						bp->tx_cos_queue[i].id;
-					break;
-				}
-			}
+			/* When CoS classification is disabled, for normal NIC
+			 * operations, ideally we should look to use LOSSY.
+			 * If not found, fallback to the first valid profile
+			 */
+			if (!bnxt_find_lossy_profile(bp))
+				bnxt_find_first_valid_profile(bp);
+
 		}
 	}
 
@@ -2455,8 +2496,7 @@ int bnxt_clear_hwrm_vnic_filters(struct bnxt *bp, struct bnxt_vnic_info *vnic)
 			rc = bnxt_hwrm_clear_em_filter(bp, filter);
 		else if (filter->filter_type == HWRM_CFA_NTUPLE_FILTER)
 			rc = bnxt_hwrm_clear_ntuple_filter(bp, filter);
-		else
-			rc = bnxt_hwrm_clear_l2_filter(bp, filter);
+		rc = bnxt_hwrm_clear_l2_filter(bp, filter);
 		STAILQ_REMOVE(&vnic->filter, filter, bnxt_filter_info, next);
 		bnxt_free_filter(bp, filter);
 	}
@@ -2478,8 +2518,7 @@ bnxt_clear_hwrm_vnic_flows(struct bnxt *bp, struct bnxt_vnic_info *vnic)
 			rc = bnxt_hwrm_clear_em_filter(bp, filter);
 		else if (filter->filter_type == HWRM_CFA_NTUPLE_FILTER)
 			rc = bnxt_hwrm_clear_ntuple_filter(bp, filter);
-		else
-			rc = bnxt_hwrm_clear_l2_filter(bp, filter);
+		rc = bnxt_hwrm_clear_l2_filter(bp, filter);
 
 		STAILQ_REMOVE(&vnic->flow_list, flow, rte_flow, next);
 		rte_free(flow);
@@ -4192,7 +4231,6 @@ int bnxt_hwrm_clear_em_filter(struct bnxt *bp, struct bnxt_filter_info *filter)
 	if (filter->fw_em_filter_id == UINT64_MAX)
 		return 0;
 
-	PMD_DRV_LOG(ERR, "Clear EM filter\n");
 	HWRM_PREP(req, CFA_EM_FLOW_FREE, BNXT_USE_KONG(bp));
 
 	req.em_filter_id = rte_cpu_to_le_64(filter->fw_em_filter_id);
@@ -4284,6 +4322,7 @@ int bnxt_hwrm_set_ntuple_filter(struct bnxt *bp,
 	HWRM_CHECK_RESULT();
 
 	filter->fw_ntuple_filter_id = rte_le_to_cpu_64(resp->ntuple_filter_id);
+	filter->flow_id = rte_le_to_cpu_32(resp->flow_id);
 	HWRM_UNLOCK();
 
 	return rc;
@@ -4844,7 +4883,7 @@ int bnxt_hwrm_if_change(struct bnxt *bp, bool up)
 	uint32_t flags;
 	int rc;
 
-	if (!(bp->flags & BNXT_FLAG_FW_CAP_IF_CHANGE))
+	if (!(bp->fw_cap & BNXT_FW_CAP_IF_CHANGE))
 		return 0;
 
 	/* Do not issue FUNC_DRV_IF_CHANGE during reset recovery.
@@ -4887,7 +4926,7 @@ int bnxt_hwrm_error_recovery_qcfg(struct bnxt *bp)
 	int rc;
 
 	/* Older FW does not have error recovery support */
-	if (!(bp->flags & BNXT_FLAG_FW_CAP_ERROR_RECOVERY))
+	if (!(bp->fw_cap & BNXT_FW_CAP_ERROR_RECOVERY))
 		return 0;
 
 	if (!info) {

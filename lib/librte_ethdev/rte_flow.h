@@ -502,7 +502,7 @@ enum rte_flow_item_type {
 	 */
 	RTE_FLOW_ITEM_TYPE_HIGIG2,
 
-	/*
+	/**
 	 * [META]
 	 *
 	 * Matches a tag value.
@@ -510,6 +510,16 @@ enum rte_flow_item_type {
 	 * See struct rte_flow_item_tag.
 	 */
 	RTE_FLOW_ITEM_TYPE_TAG,
+
+	/**
+	 * Matches a L2TPv3 over IP header.
+	 *
+	 * Configure flow for L2TPv3 over IP packets.
+	 *
+	 * See struct rte_flow_item_l2tpv3oip.
+	 */
+	RTE_FLOW_ITEM_TYPE_L2TPV3OIP,
+
 };
 
 /**
@@ -1374,6 +1384,23 @@ static const struct rte_flow_item_tag rte_flow_item_tag_mask = {
 #endif
 
 /**
+ * RTE_FLOW_ITEM_TYPE_L2TPV3OIP.
+ *
+ * Matches a L2TPv3 over IP header.
+ */
+struct rte_flow_item_l2tpv3oip {
+	rte_be32_t session_id; /**< Session ID. */
+};
+
+/** Default mask for RTE_FLOW_ITEM_TYPE_L2TPV3OIP. */
+#ifndef __cplusplus
+static const struct rte_flow_item_l2tpv3oip rte_flow_item_l2tpv3oip_mask = {
+	.session_id = RTE_BE32(UINT32_MAX),
+};
+#endif
+
+
+/**
  * @warning
  * @b EXPERIMENTAL: this structure may change without prior notice
  *
@@ -2004,6 +2031,26 @@ enum rte_flow_action_type {
 	 * See struct rte_flow_action_set_meta.
 	 */
 	RTE_FLOW_ACTION_TYPE_SET_META,
+
+	/**
+	 * Modify IPv4 DSCP in the outermost IP header.
+	 *
+	 * If flow pattern does not define a valid RTE_FLOW_ITEM_TYPE_IPV4,
+	 * then the PMD should return a RTE_FLOW_ERROR_TYPE_ACTION error.
+	 *
+	 * See struct rte_flow_action_set_dscp.
+	 */
+	RTE_FLOW_ACTION_TYPE_SET_IPV4_DSCP,
+
+	/**
+	 * Modify IPv6 DSCP in the outermost IP header.
+	 *
+	 * If flow pattern does not define a valid RTE_FLOW_ITEM_TYPE_IPV6,
+	 * then the PMD should return a RTE_FLOW_ERROR_TYPE_ACTION error.
+	 *
+	 * See struct rte_flow_action_set_dscp.
+	 */
+	RTE_FLOW_ACTION_TYPE_SET_IPV6_DSCP,
 };
 
 /**
@@ -2239,6 +2286,11 @@ struct rte_flow_action_meter {
  * direction.
  *
  * Multiple flows can be configured to use the same security session.
+ *
+ * The NULL value is allowed for security session. If security session is NULL,
+ * then SPI field in ESP flow item and IP addresses in flow items 'IPv4' and
+ * 'IPv6' will be allowed to be a range. The rule thus created can enable
+ * security processing on multiple flows.
  */
 struct rte_flow_action_security {
 	void *security_session; /**< Pointer to security session structure. */
@@ -2530,6 +2582,17 @@ struct rte_flow_action_set_meta {
 	uint32_t mask;
 };
 
+/**
+ * RTE_FLOW_ACTION_TYPE_SET_IPV4_DSCP
+ * RTE_FLOW_ACTION_TYPE_SET_IPV6_DSCP
+ *
+ * Set the DSCP value for IPv4/IPv6 header.
+ * DSCP in low 6 bits, rest ignored.
+ */
+struct rte_flow_action_set_dscp {
+	uint8_t dscp;
+};
+
 /* Mbuf dynamic field offset for metadata. */
 extern int rte_flow_dynf_metadata_offs;
 
@@ -2789,6 +2852,27 @@ enum rte_flow_conv_op {
 	 */
 	RTE_FLOW_CONV_OP_ACTION_NAME_PTR,
 };
+
+/**
+ * @warning
+ * @b EXPERIMENTAL: this API may change without prior notice.
+ *
+ * Dump hardware internal representation information of
+ * rte flow to file.
+ *
+ * @param[in] port_id
+ *    The port identifier of the Ethernet device.
+ * @param[in] file
+ *   A pointer to a file for output.
+ * @param[out] error
+ *   Perform verbose error reporting if not NULL. PMDs initialize this
+ *   structure in case of error only.
+ * @return
+ *   0 on success, a nagative value otherwise.
+ */
+__rte_experimental
+int
+rte_flow_dev_dump(uint16_t port_id, FILE *file, struct rte_flow_error *error);
 
 /**
  * Check if mbuf dynamic field for metadata is registered.

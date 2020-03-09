@@ -41,6 +41,7 @@ enum index {
 	BOOLEAN,
 	STRING,
 	HEX,
+	FILE_PATH,
 	MAC_ADDR,
 	IPV4_ADDR,
 	IPV6_ADDR,
@@ -63,6 +64,7 @@ enum index {
 	CREATE,
 	DESTROY,
 	FLUSH,
+	DUMP,
 	QUERY,
 	LIST,
 	ISOLATE,
@@ -168,6 +170,7 @@ enum index {
 	ITEM_FUZZY,
 	ITEM_FUZZY_THRESH,
 	ITEM_GTP,
+	ITEM_GTP_MSG_TYPE,
 	ITEM_GTP_TEID,
 	ITEM_GTPC,
 	ITEM_GTPU,
@@ -213,6 +216,10 @@ enum index {
 	ITEM_TAG,
 	ITEM_TAG_DATA,
 	ITEM_TAG_INDEX,
+	ITEM_L2TPV3OIP,
+	ITEM_L2TPV3OIP_SESSION_ID,
+	ITEM_ESP,
+	ITEM_ESP_SPI,
 
 	/* Validate/create actions. */
 	ACTIONS,
@@ -326,6 +333,10 @@ enum index {
 	ACTION_SET_META,
 	ACTION_SET_META_DATA,
 	ACTION_SET_META_MASK,
+	ACTION_SET_IPV4_DSCP,
+	ACTION_SET_IPV4_DSCP_VALUE,
+	ACTION_SET_IPV6_DSCP,
+	ACTION_SET_IPV6_DSCP_VALUE,
 };
 
 /** Maximum size for pattern in struct rte_flow_item_raw. */
@@ -632,6 +643,9 @@ struct buffer {
 			uint32_t rule_n;
 		} destroy; /**< Destroy arguments. */
 		struct {
+			char file[128];
+		} dump; /**< Dump arguments. */
+		struct {
 			uint32_t rule;
 			struct rte_flow_action action;
 		} query; /**< Query arguments. */
@@ -681,6 +695,12 @@ static const enum index next_vc_attr[] = {
 
 static const enum index next_destroy_attr[] = {
 	DESTROY_RULE,
+	END,
+	ZERO,
+};
+
+static const enum index next_dump_attr[] = {
+	FILE_PATH,
 	END,
 	ZERO,
 };
@@ -746,6 +766,8 @@ static const enum index next_item[] = {
 	ITEM_PPPOE_PROTO_ID,
 	ITEM_HIGIG2,
 	ITEM_TAG,
+	ITEM_L2TPV3OIP,
+	ITEM_ESP,
 	END_SET,
 	ZERO,
 };
@@ -909,6 +931,7 @@ static const enum index item_gre_key[] = {
 };
 
 static const enum index item_gtp[] = {
+	ITEM_GTP_MSG_TYPE,
 	ITEM_GTP_TEID,
 	ITEM_NEXT,
 	ZERO,
@@ -1017,6 +1040,12 @@ static const enum index item_higig2[] = {
 	ZERO,
 };
 
+static const enum index item_esp[] = {
+	ITEM_ESP_SPI,
+	ITEM_NEXT,
+	ZERO,
+};
+
 static const enum index next_set_raw[] = {
 	SET_RAW_INDEX,
 	ITEM_ETH,
@@ -1026,6 +1055,12 @@ static const enum index next_set_raw[] = {
 static const enum index item_tag[] = {
 	ITEM_TAG_DATA,
 	ITEM_TAG_INDEX,
+	ITEM_NEXT,
+	ZERO,
+};
+
+static const enum index item_l2tpv3oip[] = {
+	ITEM_L2TPV3OIP_SESSION_ID,
 	ITEM_NEXT,
 	ZERO,
 };
@@ -1087,6 +1122,8 @@ static const enum index next_action[] = {
 	ACTION_RAW_DECAP,
 	ACTION_SET_TAG,
 	ACTION_SET_META,
+	ACTION_SET_IPV4_DSCP,
+	ACTION_SET_IPV6_DSCP,
 	ZERO,
 };
 
@@ -1300,6 +1337,18 @@ static const enum index action_set_meta[] = {
 	ZERO,
 };
 
+static const enum index action_set_ipv4_dscp[] = {
+	ACTION_SET_IPV4_DSCP_VALUE,
+	ACTION_NEXT,
+	ZERO,
+};
+
+static const enum index action_set_ipv6_dscp[] = {
+	ACTION_SET_IPV6_DSCP_VALUE,
+	ACTION_NEXT,
+	ZERO,
+};
+
 static int parse_set_raw_encap_decap(struct context *, const struct token *,
 				     const char *, unsigned int,
 				     void *, unsigned int);
@@ -1374,6 +1423,9 @@ static int parse_destroy(struct context *, const struct token *,
 static int parse_flush(struct context *, const struct token *,
 		       const char *, unsigned int,
 		       void *, unsigned int);
+static int parse_dump(struct context *, const struct token *,
+		      const char *, unsigned int,
+		      void *, unsigned int);
 static int parse_query(struct context *, const struct token *,
 		       const char *, unsigned int,
 		       void *, unsigned int);
@@ -1401,6 +1453,9 @@ static int parse_string(struct context *, const struct token *,
 static int parse_hex(struct context *ctx, const struct token *token,
 			const char *str, unsigned int len,
 			void *buf, unsigned int size);
+static int parse_string0(struct context *, const struct token *,
+			const char *, unsigned int,
+			void *, unsigned int);
 static int parse_mac_addr(struct context *, const struct token *,
 			  const char *, unsigned int,
 			  void *, unsigned int);
@@ -1494,6 +1549,12 @@ static const struct token token_list[] = {
 		.type = "HEX",
 		.help = "fixed string",
 		.call = parse_hex,
+	},
+	[FILE_PATH] = {
+		.name = "{file path}",
+		.type = "STRING",
+		.help = "file path",
+		.call = parse_string0,
 		.comp = comp_none,
 	},
 	[MAC_ADDR] = {
@@ -1555,6 +1616,7 @@ static const struct token token_list[] = {
 			      CREATE,
 			      DESTROY,
 			      FLUSH,
+			      DUMP,
 			      LIST,
 			      QUERY,
 			      ISOLATE)),
@@ -1588,6 +1650,14 @@ static const struct token token_list[] = {
 		.next = NEXT(NEXT_ENTRY(PORT_ID)),
 		.args = ARGS(ARGS_ENTRY(struct buffer, port)),
 		.call = parse_flush,
+	},
+	[DUMP] = {
+		.name = "dump",
+		.help = "dump all flow rules to file",
+		.next = NEXT(next_dump_attr, NEXT_ENTRY(PORT_ID)),
+		.args = ARGS(ARGS_ENTRY(struct buffer, args.dump.file),
+			     ARGS_ENTRY(struct buffer, port)),
+		.call = parse_dump,
 	},
 	[QUERY] = {
 		.name = "query",
@@ -2257,6 +2327,13 @@ static const struct token token_list[] = {
 		.next = NEXT(item_gtp),
 		.call = parse_vc,
 	},
+	[ITEM_GTP_MSG_TYPE] = {
+		.name = "msg_type",
+		.help = "GTP message type",
+		.next = NEXT(item_gtp, NEXT_ENTRY(UNSIGNED), item_param),
+		.args = ARGS(ARGS_ENTRY_HTON(struct rte_flow_item_gtp,
+					     msg_type)),
+	},
 	[ITEM_GTP_TEID] = {
 		.name = "teid",
 		.help = "tunnel endpoint identifier",
@@ -2592,6 +2669,35 @@ static const struct token token_list[] = {
 		.next = NEXT(item_tag, NEXT_ENTRY(UNSIGNED),
 			     NEXT_ENTRY(ITEM_PARAM_IS)),
 		.args = ARGS(ARGS_ENTRY(struct rte_flow_item_tag, index)),
+	},
+	[ITEM_L2TPV3OIP] = {
+		.name = "l2tpv3oip",
+		.help = "match L2TPv3 over IP header",
+		.priv = PRIV_ITEM(L2TPV3OIP,
+				  sizeof(struct rte_flow_item_l2tpv3oip)),
+		.next = NEXT(item_l2tpv3oip),
+		.call = parse_vc,
+	},
+	[ITEM_L2TPV3OIP_SESSION_ID] = {
+		.name = "session_id",
+		.help = "session identifier",
+		.next = NEXT(item_l2tpv3oip, NEXT_ENTRY(UNSIGNED), item_param),
+		.args = ARGS(ARGS_ENTRY_HTON(struct rte_flow_item_l2tpv3oip,
+					     session_id)),
+	},
+	[ITEM_ESP] = {
+		.name = "esp",
+		.help = "match ESP header",
+		.priv = PRIV_ITEM(ESP, sizeof(struct rte_flow_item_esp)),
+		.next = NEXT(item_esp),
+		.call = parse_vc,
+	},
+	[ITEM_ESP_SPI] = {
+		.name = "spi",
+		.help = "security policy index",
+		.next = NEXT(item_esp, NEXT_ENTRY(UNSIGNED), item_param),
+		.args = ARGS(ARGS_ENTRY_HTON(struct rte_flow_item_esp,
+				hdr.spi)),
 	},
 	/* Validate/create actions. */
 	[ACTIONS] = {
@@ -3491,6 +3597,38 @@ static const struct token token_list[] = {
 		.next = NEXT(action_set_meta, NEXT_ENTRY(UNSIGNED)),
 		.args = ARGS(ARGS_ENTRY
 			     (struct rte_flow_action_set_meta, mask)),
+		.call = parse_vc_conf,
+	},
+	[ACTION_SET_IPV4_DSCP] = {
+		.name = "set_ipv4_dscp",
+		.help = "set DSCP value",
+		.priv = PRIV_ACTION(SET_IPV4_DSCP,
+			sizeof(struct rte_flow_action_set_dscp)),
+		.next = NEXT(action_set_ipv4_dscp),
+		.call = parse_vc,
+	},
+	[ACTION_SET_IPV4_DSCP_VALUE] = {
+		.name = "dscp_value",
+		.help = "new IPv4 DSCP value to set",
+		.next = NEXT(action_set_ipv4_dscp, NEXT_ENTRY(UNSIGNED)),
+		.args = ARGS(ARGS_ENTRY
+			     (struct rte_flow_action_set_dscp, dscp)),
+		.call = parse_vc_conf,
+	},
+	[ACTION_SET_IPV6_DSCP] = {
+		.name = "set_ipv6_dscp",
+		.help = "set DSCP value",
+		.priv = PRIV_ACTION(SET_IPV6_DSCP,
+			sizeof(struct rte_flow_action_set_dscp)),
+		.next = NEXT(action_set_ipv6_dscp),
+		.call = parse_vc,
+	},
+	[ACTION_SET_IPV6_DSCP_VALUE] = {
+		.name = "dscp_value",
+		.help = "new IPv6 DSCP value to set",
+		.next = NEXT(action_set_ipv6_dscp, NEXT_ENTRY(UNSIGNED)),
+		.args = ARGS(ARGS_ENTRY
+			     (struct rte_flow_action_set_dscp, dscp)),
 		.call = parse_vc_conf,
 	},
 };
@@ -5012,6 +5150,33 @@ parse_flush(struct context *ctx, const struct token *token,
 	return len;
 }
 
+/** Parse tokens for dump command. */
+static int
+parse_dump(struct context *ctx, const struct token *token,
+	    const char *str, unsigned int len,
+	    void *buf, unsigned int size)
+{
+	struct buffer *out = buf;
+
+	/* Token name must match. */
+	if (parse_default(ctx, token, str, len, NULL, 0) < 0)
+		return -1;
+	/* Nothing else to do if there is no buffer. */
+	if (!out)
+		return len;
+	if (!out->command) {
+		if (ctx->curr != DUMP)
+			return -1;
+		if (sizeof(*out) > size)
+			return -1;
+		out->command = ctx->curr;
+		ctx->objdata = 0;
+		ctx->object = out;
+		ctx->objmask = NULL;
+	}
+	return len;
+}
+
 /** Parse tokens for query command. */
 static int
 parse_query(struct context *ctx, const struct token *token,
@@ -5407,6 +5572,35 @@ error:
 	push_args(ctx, arg_data);
 	return -1;
 
+}
+
+/**
+ * Parse a zero-ended string.
+ */
+static int
+parse_string0(struct context *ctx, const struct token *token __rte_unused,
+	     const char *str, unsigned int len,
+	     void *buf, unsigned int size)
+{
+	const struct arg *arg_data = pop_args(ctx);
+
+	/* Arguments are expected. */
+	if (!arg_data)
+		return -1;
+	size = arg_data->size;
+	/* Bit-mask fill is not supported. */
+	if (arg_data->mask || size < len + 1)
+		goto error;
+	if (!ctx->object)
+		return len;
+	buf = (uint8_t *)ctx->object + arg_data->offset;
+	strncpy(buf, str, len);
+	if (ctx->objmask)
+		memset((uint8_t *)ctx->objmask + arg_data->offset, 0xff, len);
+	return len;
+error:
+	push_args(ctx, arg_data);
+	return -1;
 }
 
 /**
@@ -6068,6 +6262,9 @@ cmd_flow_parsed(const struct buffer *in)
 	case FLUSH:
 		port_flow_flush(in->port);
 		break;
+	case DUMP:
+		port_flow_dump(in->port, in->args.dump.file);
+		break;
 	case QUERY:
 		port_flow_query(in->port, in->args.query.rule,
 				&in->args.query.action);
@@ -6230,14 +6427,21 @@ flow_item_default_mask(const struct rte_flow_item *item)
 	case RTE_FLOW_ITEM_TYPE_GTP:
 		mask = &rte_flow_item_gtp_mask;
 		break;
-	case RTE_FLOW_ITEM_TYPE_ESP:
-		mask = &rte_flow_item_esp_mask;
-		break;
 	case RTE_FLOW_ITEM_TYPE_GTP_PSC:
 		mask = &rte_flow_item_gtp_psc_mask;
 		break;
+	case RTE_FLOW_ITEM_TYPE_GENEVE:
+		mask = &rte_flow_item_geneve_mask;
+		break;
 	case RTE_FLOW_ITEM_TYPE_PPPOE_PROTO_ID:
 		mask = &rte_flow_item_pppoe_proto_id_mask;
+		break;
+	case RTE_FLOW_ITEM_TYPE_L2TPV3OIP:
+		mask = &rte_flow_item_l2tpv3oip_mask;
+		break;
+	case RTE_FLOW_ITEM_TYPE_ESP:
+		mask = &rte_flow_item_esp_mask;
+		break;
 	default:
 		break;
 	}
@@ -6326,6 +6530,14 @@ cmd_set_raw_parsed(const struct buffer *in)
 			break;
 		case RTE_FLOW_ITEM_TYPE_GENEVE:
 			size = sizeof(struct rte_flow_item_geneve);
+			break;
+		case RTE_FLOW_ITEM_TYPE_L2TPV3OIP:
+			size = sizeof(struct rte_flow_item_l2tpv3oip);
+			proto = 0x73;
+			break;
+		case RTE_FLOW_ITEM_TYPE_ESP:
+			size = sizeof(struct rte_flow_item_esp);
+			proto = 0x32;
 			break;
 		default:
 			printf("Error - Not supported item\n");

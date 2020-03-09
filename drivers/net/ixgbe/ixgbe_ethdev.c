@@ -378,6 +378,7 @@ static int ixgbe_dev_udp_tunnel_port_del(struct rte_eth_dev *dev,
 					 struct rte_eth_udp_tunnel *udp_tunnel);
 static int ixgbe_filter_restore(struct rte_eth_dev *dev);
 static void ixgbe_l2_tunnel_conf(struct rte_eth_dev *dev);
+static int ixgbe_wait_for_link_up(struct ixgbe_hw *hw);
 
 /*
  * Define VF Stats MACRO for Non "cleared on read" register
@@ -601,6 +602,7 @@ static const struct eth_dev_ops ixgbe_eth_dev_ops = {
 	.udp_tunnel_port_add  = ixgbe_dev_udp_tunnel_port_add,
 	.udp_tunnel_port_del  = ixgbe_dev_udp_tunnel_port_del,
 	.tm_ops_get           = ixgbe_tm_ops_get,
+	.tx_done_cleanup      = ixgbe_dev_tx_done_cleanup,
 };
 
 /*
@@ -649,6 +651,7 @@ static const struct eth_dev_ops ixgbevf_eth_dev_ops = {
 	.reta_query           = ixgbe_dev_rss_reta_query,
 	.rss_hash_update      = ixgbe_dev_rss_hash_update,
 	.rss_hash_conf_get    = ixgbe_dev_rss_hash_conf_get,
+	.tx_done_cleanup      = ixgbe_dev_tx_done_cleanup,
 };
 
 /* store statistics names and its offset in stats structure */
@@ -2544,7 +2547,8 @@ ixgbe_dev_start(struct rte_eth_dev *dev)
 	struct rte_pci_device *pci_dev = RTE_ETH_DEV_TO_PCI(dev);
 	struct rte_intr_handle *intr_handle = &pci_dev->intr_handle;
 	uint32_t intr_vector = 0;
-	int err, link_up = 0, negotiate = 0;
+	int err;
+	bool link_up = false, negotiate = 0;
 	uint32_t speed = 0;
 	uint32_t allowed_speeds = 0;
 	int mask = 0;
@@ -2557,17 +2561,6 @@ ixgbe_dev_start(struct rte_eth_dev *dev)
 		IXGBE_DEV_PRIVATE_TO_MACSEC_SETTING(dev->data->dev_private);
 
 	PMD_INIT_FUNC_TRACE();
-
-	/* IXGBE devices don't support:
-	*    - half duplex (checked afterwards for valid speeds)
-	*    - fixed speed: TODO implement
-	*/
-	if (dev->data->dev_conf.link_speeds & ETH_LINK_SPEED_FIXED) {
-		PMD_INIT_LOG(ERR,
-		"Invalid link_speeds for port %u, fix speed not supported",
-				dev->data->port_id);
-		return -EINVAL;
-	}
 
 	/* Stop the link setup handler before resetting the HW. */
 	rte_eal_alarm_cancel(ixgbe_dev_setup_link_alarm_handler, dev);
@@ -2724,7 +2717,11 @@ ixgbe_dev_start(struct rte_eth_dev *dev)
 	}
 
 	link_speeds = &dev->data->dev_conf.link_speeds;
-	if (*link_speeds & ~allowed_speeds) {
+
+	/* Ignore autoneg flag bit and check the validity of 
+	 * link_speed 
+	 */
+	if (((*link_speeds) >> 1) & ~(allowed_speeds >> 1)) {
 		PMD_INIT_LOG(ERR, "Invalid link setting");
 		goto error;
 	}
@@ -2800,6 +2797,11 @@ skip_link_setup:
 		PMD_DRV_LOG(WARNING,
 			    "please call hierarchy_commit() "
 			    "before starting the port");
+
+	/* wait for the controller to acquire link */
+	err = ixgbe_wait_for_link_up(hw);
+	if (err)
+		goto error;
 
 	/*
 	 * Update link status right before return, because it may
@@ -3993,7 +3995,7 @@ ixgbevf_dev_info_get(struct rte_eth_dev *dev,
 
 static int
 ixgbevf_check_link(struct ixgbe_hw *hw, ixgbe_link_speed *speed,
-		   int *link_up, int wait_to_complete)
+		   bool *link_up, int wait_to_complete)
 {
 	struct ixgbe_adapter *adapter = container_of(hw,
 						     struct ixgbe_adapter, hw);
@@ -4114,6 +4116,37 @@ ixgbe_dev_setup_link_alarm_handler(void *param)
 	intr->flags &= ~IXGBE_FLAG_NEED_LINK_CONFIG;
 }
 
+/*
+ * In freebsd environment, nic_uio drivers do not support interrupts,
+ * rte_intr_callback_register() will fail to register interrupts.
+ * We can not make link status to change from down to up by interrupt
+ * callback. So we need to wait for the controller to acquire link
+ * when ports start.
+ * It returns 0 on link up.
+ */
+static int
+ixgbe_wait_for_link_up(struct ixgbe_hw *hw)
+{
+#ifdef RTE_EXEC_ENV_FREEBSD
+	const int nb_iter = 25;
+#else
+	const int nb_iter = 0;
+#endif
+	int err, i;
+	bool link_up = false;
+	uint32_t speed = 0;
+
+	for (i = 0; i < nb_iter; i++) {
+		err = ixgbe_check_link(hw, &speed, &link_up, 0);
+		if (err)
+			return err;
+		if (link_up)
+			return 0;
+		msec_delay(200);
+	}
+	return 0;
+}
+
 /* return 0 means link status changed, -1 means not changed */
 int
 ixgbe_dev_link_update_share(struct rte_eth_dev *dev,
@@ -4124,7 +4157,7 @@ ixgbe_dev_link_update_share(struct rte_eth_dev *dev,
 	ixgbe_link_speed link_speed = IXGBE_LINK_SPEED_UNKNOWN;
 	struct ixgbe_interrupt *intr =
 		IXGBE_DEV_PRIVATE_TO_INTR(dev->data->dev_private);
-	int link_up;
+	bool link_up;
 	int diag;
 	int wait = 1;
 	u32 esdp_reg;
@@ -4133,7 +4166,8 @@ ixgbe_dev_link_update_share(struct rte_eth_dev *dev,
 	link.link_status = ETH_LINK_DOWN;
 	link.link_speed = ETH_SPEED_NUM_NONE;
 	link.link_duplex = ETH_LINK_HALF_DUPLEX;
-	link.link_autoneg = ETH_LINK_AUTONEG;
+	link.link_autoneg = !(dev->data->dev_conf.link_speeds &
+			ETH_LINK_SPEED_FIXED);
 
 	hw->mac.get_link_status = true;
 
@@ -4155,9 +4189,11 @@ ixgbe_dev_link_update_share(struct rte_eth_dev *dev,
 		return rte_eth_linkstatus_set(dev, &link);
 	}
 
-	esdp_reg = IXGBE_READ_REG(hw, IXGBE_ESDP);
-	if ((esdp_reg & IXGBE_ESDP_SDP3))
-		link_up = 0;
+	if (ixgbe_get_media_type(hw) == ixgbe_media_type_fiber) {
+		esdp_reg = IXGBE_READ_REG(hw, IXGBE_ESDP);
+		if ((esdp_reg & IXGBE_ESDP_SDP3))
+			link_up = 0;
+	}
 
 	if (link_up == 0) {
 		if (ixgbe_get_media_type(hw) == ixgbe_media_type_fiber) {

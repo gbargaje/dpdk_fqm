@@ -9,10 +9,11 @@ endif
 dpdk_driver_classes = ['common',
 	       'bus',
 	       'mempool', # depends on common and bus.
-	       'raw',     # depends on common and bus.
-	       'net',     # depends on common, bus, mempool and raw.
+	       'net',     # depends on common, bus, mempool
+	       'raw',     # depends on common, bus and net.
 	       'crypto',  # depends on common, bus and mempool (net in future).
 	       'compress', # depends on common, bus, mempool.
+	       'vdpa',    # depends on common, bus and mempool.
 	       'event',   # depends on common, bus, mempool and net.
 	       'baseband'] # depends on common and bus.
 
@@ -132,10 +133,10 @@ foreach class:dpdk_driver_classes
 
 			if is_experimental != 0
 				lib_version = experimental_abi_version
-				so_version = experimental_abi_version
+				so_version = experimental_so_version
 			else
 				lib_version = abi_version
-				so_version = abi_version
+				so_version = stable_so_version
 			endif
 
 			# now build the static driver
