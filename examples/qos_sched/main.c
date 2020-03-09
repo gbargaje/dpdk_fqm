@@ -214,13 +214,28 @@ main(int argc, char **argv)
 	}
 	else {
 		/* print statistics every second */
-		uint64_t cycles = rte_get_timer_hz();
 		uint64_t prev_tsc = 0, cur_tsc, diff_tsc;
+		uint64_t prev_tsc1 = 0, diff_tsc1;
+
+        	//unsigned lcore_id;
+	        //lcore_id = rte_lcore_id();
+
+		uint64_t cycles = rte_get_timer_hz();
+	        uint64_t cycles1 = 5 * rte_get_timer_hz() / 1000u;
+		
 		while(1) {
 			//sleep(1);
-			rte_pie_timer_mainloop(NULL);
+			//rte_pie_timer_mainloop(NULL);
+
+        		//RTE_LOG(INFO, SCHED, "Starting timer mainloop on core : %u\n", lcore_id);
+		        cur_tsc = rte_rdtsc();
+		        diff_tsc1 = cur_tsc - prev_tsc1;
+		        if (diff_tsc1 > cycles1) { //TIMER_RESOLUTION_CYCLES) {
+		                rte_timer_manage();
+		                prev_tsc1 = cur_tsc;
+		        }
 			
-			cur_tsc = rte_rdtsc();
+			//cur_tsc = rte_rdtsc();
 			diff_tsc = cur_tsc - prev_tsc;
 			if (diff_tsc > cycles) {
 				app_stat();
