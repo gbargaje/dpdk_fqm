@@ -56,8 +56,9 @@ static inline uint64_t max(uint64_t a, uint64_t b)
 	return a > b ? a : b;
 }
 
-//Update periodically, T_UPDATE = 15 milliseconds
-__rte_unused static void rte_pie_cal_drop_prob(
+
+//callback function for the timers
+__rte_unused static void rte_pie_calc_drop_prob(
 		__attribute__((unused)) struct rte_timer *tim,	void *arg)
 {
 	struct rte_pie_all *pie_all = (struct rte_pie_all *) arg;
@@ -71,6 +72,7 @@ __rte_unused static void rte_pie_cal_drop_prob(
 	uint64_t p = ((config->alpha * (cur_qdelay- target_delay)) >> AB_SCALE) +
 			((config->beta * (cur_qdelay - old_qdelay)) >> AB_SCALE);
 
+	printf("Entering timer callback with p = %ld\n", p);
 	//How alpha and beta are set?
 	if 		  (pie->drop_prob < 4294) {				//2^32*0.000001
 		p /= 2048;
@@ -94,18 +96,18 @@ __rte_unused static void rte_pie_cal_drop_prob(
 	}
 	pie->drop_prob += p;
 
+
 	//Exponentially decay drop prob when congestion goes away
 	if (cur_qdelay < target_delay/2 && old_qdelay < target_delay/2) {
 		//pie->drop_prob *= 0.98;        //1 - 1/64 is sufficient
 		pie->drop_prob -= (MAX_PROB>>6);
 	}
 
-/*	//Bound drop probability
-	if (pie->drop_prob < 0u)
-		pie->drop_prob = 0u; */
-
+	//Bound drop probability
 	if (pie->drop_prob > MAX_PROB)
 		pie->drop_prob = MAX_PROB;
+
+	printf("Drop prob = %ld\n", pie->drop_prob);
 
 	//Burst tolerance
 	pie->burst_allowance = max(0, pie->burst_allowance - config->t_update);
