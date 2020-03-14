@@ -1200,6 +1200,8 @@ rte_sched_subport_config(struct rte_sched_port *port,
 			qe = s->queue_extra + i;
 			pie_all->pie = &qe->pie;
 
+			rte_pie_data_init(pie_all->pie);
+
 			rte_timer_reset(&timer[i][j], hz, PERIODICAL,
 					lcore_id, rte_pie_calc_drop_prob, (void *) pie_all);
 		}

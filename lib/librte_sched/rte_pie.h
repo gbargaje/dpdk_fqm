@@ -8,7 +8,7 @@ extern "C" {
 
 #define DROP 			1
 #define ENQUEUE 		0
-#define MAX_PROB		0xffffffff	//2^32
+#define MAX_PROB		0xfffff	//2^16
 #define AB_SCALE		5
 
 #include <stdio.h>
@@ -18,26 +18,27 @@ extern "C" {
 
 struct rte_pie_params{
 	uint32_t target_delay;		//Target Queue Delay
-	uint32_t t_update;			//drop rate calculation period
+	uint32_t t_update;		//drop rate calculation period
 	uint32_t mean_pkt_size;		//(2 * Mean packet size) in number of packets.
 	uint32_t max_burst;
 };
 
 struct rte_pie_config {
 	uint32_t target_delay;		//Target Queue Delay
-	uint32_t t_update;			//drop rate calculation period
+	uint32_t t_update;		//drop rate calculation period
 	uint32_t alpha;
 	uint32_t beta;
 	uint32_t mean_pkt_size;		//(2*Mean packet size) in number of packets.
 	uint32_t max_burst;
+	uint64_t cps;			//cycles per second
 };
 
 struct rte_pie {
-	uint64_t drop_prob;			//Drop rate
+	uint64_t drop_prob;		//Drop rate
 	uint32_t burst_allowance;	//burst allowance, initialized with value of MAX_BURST.
 	uint64_t old_qdelay;		//Old queue delay
-	uint64_t cur_qdelay;			//current queue delay
-	uint64_t accu_prob;			//Accumulated drop rate.. Derandomization.
+	uint64_t cur_qdelay;		//current queue delay
+	uint64_t accu_prob;		//Accumulated drop rate.. Derandomization.
 };
 
 //may or may not be required
@@ -51,48 +52,54 @@ int rte_pie_data_init(struct rte_pie *);
 int rte_pie_drop(struct rte_pie_config *, struct rte_pie *, uint32_t);
 int rte_pie_enqueue(struct rte_pie_config *, struct rte_pie *, uint32_t);
 
-static inline uint64_t max(uint64_t a, uint64_t b)
-{
+static inline uint64_t max(uint64_t a, uint64_t b) {
 	return a > b ? a : b;
 }
 
-
 //callback function for the timers
 __rte_unused static void rte_pie_calc_drop_prob(
-		__attribute__((unused)) struct rte_timer *tim,	void *arg)
+		__attribute__((unused)) struct rte_timer *tim, void *arg)
 {
 	struct rte_pie_all *pie_all = (struct rte_pie_all *) arg;
 	struct rte_pie_config *config = pie_all->pie_config;
 	struct rte_pie *pie = pie_all->pie;
 
-	uint64_t cur_qdelay = pie->cur_qdelay;			//in hz
+	uint64_t cur_qdelay = pie->cur_qdelay * 1000000 / config->cps;			//in hz
 	uint64_t old_qdelay = pie->old_qdelay;			//in hz
-	uint64_t target_delay = config->target_delay;	//in microseconds
+	uint64_t target_delay = config->target_delay;		//in microseconds
 
-	uint64_t p = ((config->alpha * (cur_qdelay- target_delay)) >> AB_SCALE) +
-			((config->beta * (cur_qdelay - old_qdelay)) >> AB_SCALE);
+	int64_t a = (int64_t) cur_qdelay - (int64_t) target_delay; 	//in microseconds
+	int64_t b = (int64_t) cur_qdelay - (int64_t) old_qdelay;	// in microseconds
+	int64_t p = ((config->alpha * a)  >> AB_SCALE) + ((config->beta * b) >> AB_SCALE);
+	RTE_LOG(INFO, SCHED, " rte_get_timer_hz: %lu\n", rte_get_timer_hz());
+	RTE_LOG(INFO, SCHED, " Value cur_qdelay: %ld, old_qdelay: %ld, td: %ld\n", cur_qdelay, old_qdelay, target_delay);
+	RTE_LOG(INFO, SCHED, " Value pie->cdel: %ld, pie->odel: %ld\n",pie-> cur_qdelay,pie-> old_qdelay);
+	RTE_LOG(INFO, SCHED, " Value a: %ld, b: %ld, p: %ld \n", a, b, p);	
 
-	printf("Entering timer callback with p = %ld\n", p);
+	if(p < 0)
+		p = -p;
+
+	//printf("Entering timer callback with p = %ld\n", p);
 	//How alpha and beta are set?
-	if 		  (pie->drop_prob < 4294) {				//2^32*0.000001
+	if 	  (pie->drop_prob < 1) {		//2^32*0.000001
 		p /= 2048;
-	} else if (pie->drop_prob < 42949) {		//2^32*0.00001
+	} else if (pie->drop_prob < 10) {		//2^32*0.00001
 		p /= 512;
-	} else if (pie->drop_prob < 429496) {		//2^32*0.0001
+	} else if (pie->drop_prob < 100) {		//2^32*0.0001
 		p /= 128;
-	} else if (pie->drop_prob < 4294967) {		//2^32*0.001
+	} else if (pie->drop_prob < 1000) {		//2^32*0.001
 		p /= 32;
-	} else if (pie->drop_prob < 42949672) {		//2^32*0.01
+	} else if (pie->drop_prob < 10000) {		//2^32*0.01
 		p /= 8;
-	} else if (pie->drop_prob < 429496729) {	//2^32*0.1
+	} else if (pie->drop_prob < 100000) {		//2^32*0.1
 		p /= 2;
 	}	//else {
 //		p = p;
 //	}
 
 	//Cap Drop Adjustment
-	if (pie->drop_prob >= 429496729 /*0.1*/ && p > 858993459/*0.02*/) {
-		p = 858993459;	//0.02
+	if (pie->drop_prob >= 100000 /*0.1*/ && p > 20000/*0.02*/) {
+		p = 20000;	//0.02
 	}
 	pie->drop_prob += p;
 
@@ -100,7 +107,7 @@ __rte_unused static void rte_pie_calc_drop_prob(
 	//Exponentially decay drop prob when congestion goes away
 	if (cur_qdelay < target_delay/2 && old_qdelay < target_delay/2) {
 		//pie->drop_prob *= 0.98;        //1 - 1/64 is sufficient
-		pie->drop_prob -= (MAX_PROB>>6);
+		pie->drop_prob -= (pie->drop_prob >> 6);
 	}
 
 	//Bound drop probability
@@ -113,7 +120,6 @@ __rte_unused static void rte_pie_calc_drop_prob(
 	pie->burst_allowance = max(0, pie->burst_allowance - config->t_update);
 	pie->old_qdelay = cur_qdelay;
 }
-
 
 //Called on each packet departure
 static inline void rte_pie_dequeue(struct rte_pie *pie, uint64_t timestamp) {
