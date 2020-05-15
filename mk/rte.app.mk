@@ -97,6 +97,7 @@ _LDLIBS-$(CONFIG_RTE_LIBRTE_PCI)            += -lrte_pci
 _LDLIBS-$(CONFIG_RTE_LIBRTE_EAL)            += -lrte_eal
 _LDLIBS-$(CONFIG_RTE_LIBRTE_CMDLINE)        += -lrte_cmdline
 _LDLIBS-$(CONFIG_RTE_LIBRTE_REORDER)        += -lrte_reorder
+_LDLIBS-$(CONFIG_RTE_LIBRTE_AQM)            += -lrte_aqm
 _LDLIBS-$(CONFIG_RTE_LIBRTE_SCHED)          += -lrte_sched
 _LDLIBS-$(CONFIG_RTE_LIBRTE_RCU)            += -lrte_rcu
 _LDLIBS-$(CONFIG_RTE_LIBRTE_GRAPH)          += -lrte_graph

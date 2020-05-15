@@ -1003,6 +1003,11 @@ CONFIG_RTE_LIBRTE_METER=y
 CONFIG_RTE_LIBRTE_FLOW_CLASSIFY=y
 
 #
+# Compile librte_aqm
+#
+CONFIG_RTE_LIBRTE_AQM=y
+
+#
 # Compile librte_sched
 #
 CONFIG_RTE_LIBRTE_SCHED=y

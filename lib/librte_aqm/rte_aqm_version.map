@@ -1,0 +1,20 @@
+DPDK_20.0 {
+	global:
+
+	local: *;
+};
+
+EXPERIMENTAL {
+	global:
+
+	rte_aqm_get_memory_size;
+	rte_aqm_init;
+	rte_aqm_is_empty;
+	rte_aqm_is_full;
+	rte_aqm_prefetch_head;
+	rte_aqm_prefetch_tail;
+	rte_aqm_enqueue;
+	rte_aqm_dequeue;
+	rte_aqm_get_stats;
+	rte_aqm_destroy;
+};
