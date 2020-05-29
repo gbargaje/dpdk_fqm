@@ -369,7 +369,7 @@ _LDLIBS-$(CONFIG_RTE_LIBRTE_EAL)            += -lrt
 ifeq ($(CONFIG_RTE_EXEC_ENV_LINUX)$(CONFIG_RTE_EAL_NUMA_AWARE_HUGEPAGES),yy)
 _LDLIBS-$(CONFIG_RTE_LIBRTE_EAL)            += -lnuma
 endif
-_LDLIBS-$(CONFIG_RTE_LIBRTE_SCHED)          += -lm
+_LDLIBS-$(CONFIG_RTE_LIBRTE_AQM)            += -lm
 _LDLIBS-$(CONFIG_RTE_LIBRTE_SCHED)          += -lrt
 _LDLIBS-$(CONFIG_RTE_LIBRTE_MEMBER)         += -lm
 _LDLIBS-$(CONFIG_RTE_LIBRTE_METER)          += -lm

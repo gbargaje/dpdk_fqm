@@ -178,8 +178,11 @@ SRCS-$(CONFIG_RTE_LIBRTE_CMDLINE) += test_cmdline_lib.c
 
 SRCS-$(CONFIG_RTE_LIBRTE_NET) += test_crc.c
 
-ifeq ($(CONFIG_RTE_LIBRTE_SCHED),y)
+ifeq ($(CONFIG_RTE_LIBRTE_AQM),y)
 SRCS-y += test_red.c
+endif
+
+ifeq ($(CONFIG_RTE_LIBRTE_SCHED),y)
 SRCS-y += test_sched.c
 endif
 

@@ -91,6 +91,9 @@ DEPDIRS-librte_aqm := librte_eal librte_mbuf
 DIRS-$(CONFIG_RTE_LIBRTE_SCHED) += librte_sched
 DEPDIRS-librte_sched := librte_eal librte_mempool librte_mbuf librte_net
 DEPDIRS-librte_sched += librte_timer
+ifeq ($(CONFIG_RTE_SCHED_RED),y)
+DEPDIRS-librte_sched += librte_aqm
+endif
 DIRS-$(CONFIG_RTE_LIBRTE_DISTRIBUTOR) += librte_distributor
 DEPDIRS-librte_distributor := librte_eal librte_mbuf librte_ethdev
 DIRS-$(CONFIG_RTE_LIBRTE_PORT) += librte_port
