@@ -61,9 +61,9 @@ extern "C" {
 #include <rte_mbuf.h>
 #include <rte_meter.h>
 
-/** Random Early Detection (RED) */
-#ifdef RTE_SCHED_RED
-#include <rte_red.h>
+/** Active Queue Management (AQM) */
+#ifdef RTE_SCHED_AQM
+#include <rte_aqm.h>
 #endif
 
 /** Maximum number of queues per pipe.
@@ -186,9 +186,9 @@ struct rte_sched_subport_params {
 	/** Max allowed profiles in the pipe profile table */
 	uint32_t n_max_pipe_profiles;
 
-#ifdef RTE_SCHED_RED
-	/** RED parameters */
-	struct rte_red_params red_params[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE][RTE_COLORS];
+#ifdef RTE_SCHED_AQM
+	/** AQM parameters */
+	struct rte_aqm_params aqm_params[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE];
 #endif
 };
 
@@ -220,6 +220,11 @@ struct rte_sched_queue_stats {
 
 	/** Bytes dropped */
 	uint64_t n_bytes_dropped;
+
+#ifdef RTE_SCHED_AQM
+	/** AQM statistics */
+	struct rte_aqm_stats aqm_stats;
+#endif
 };
 
 /** Port configuration parameters. */

@@ -12,6 +12,10 @@
 #include "cfg_file.h"
 #include "main.h"
 
+#ifdef RTE_SCHED_AQM
+#include <rte_aqm.h>
+#include <rte_aqm_algorithm.h>
+#endif
 
 /** when we resize a file structure, how many extra entries
  * for new sections do we add in */
@@ -382,6 +386,16 @@ cfg_load_subport(struct rte_cfgfile *cfg, struct rte_sched_subport_params *subpo
 					subport_params[i].red_params[j][k].wq_log2 =
 						red_params[j][k].wq_log2;
 				}
+			}
+#endif
+#ifdef RTE_SCHED_AQM
+			struct rte_aqm_params aqm_params;
+
+			aqm_params.algorithm = RTE_AQM_FIFO;
+			aqm_params.algorithm_params = NULL;
+
+			for (j = 0; j < RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE; j++) {
+				subport_params[i].aqm_params[j] = aqm_params;
 			}
 #endif
 		}
