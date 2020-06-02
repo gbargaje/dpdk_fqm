@@ -1510,30 +1510,17 @@ rte_sched_port_update_subport_stats(struct rte_sched_port *port,
 	subport->stats.n_bytes_tc[tc_index] += pkt_len;
 }
 
-#ifdef RTE_SCHED_RED
 static inline void
-rte_sched_port_update_subport_stats_on_drop(struct rte_sched_port *port,
+rte_sched_port_update_subport_stats_on_drops(struct rte_sched_port *port,
 	struct rte_sched_subport *subport,
 	uint32_t qindex,
-	struct rte_mbuf *pkt,
-	uint32_t red)
-#else
-static inline void
-rte_sched_port_update_subport_stats_on_drop(struct rte_sched_port *port,
-	struct rte_sched_subport *subport,
-	uint32_t qindex,
-	struct rte_mbuf *pkt,
-	__rte_unused uint32_t red)
-#endif
+	uint16_t n_pkts_dropped,
+	uint16_t n_bytes_dropped)
 {
 	uint32_t tc_index = rte_sched_port_pipe_tc(port, qindex);
-	uint32_t pkt_len = pkt->pkt_len;
 
-	subport->stats.n_pkts_tc_dropped[tc_index] += 1;
-	subport->stats.n_bytes_tc_dropped[tc_index] += pkt_len;
-#ifdef RTE_SCHED_RED
-	subport->stats.n_pkts_red_dropped[tc_index] += red;
-#endif
+	subport->stats.n_pkts_tc_dropped[tc_index] += n_pkts_dropped;
+	subport->stats.n_bytes_tc_dropped[tc_index] += n_bytes_dropped;
 }
 
 static inline void
@@ -1548,28 +1535,16 @@ rte_sched_port_update_queue_stats(struct rte_sched_subport *subport,
 	qe->stats.n_bytes += pkt_len;
 }
 
-#ifdef RTE_SCHED_RED
 static inline void
-rte_sched_port_update_queue_stats_on_drop(struct rte_sched_subport *subport,
+rte_sched_port_update_queue_stats_on_drops(struct rte_sched_subport *subport,
 	uint32_t qindex,
-	struct rte_mbuf *pkt,
-	uint32_t red)
-#else
-static inline void
-rte_sched_port_update_queue_stats_on_drop(struct rte_sched_subport *subport,
-	uint32_t qindex,
-	struct rte_mbuf *pkt,
-	__rte_unused uint32_t red)
-#endif
+	uint16_t n_pkts_dropped,
+	uint16_t n_bytes_dropped)
 {
 	struct rte_sched_queue_extra *qe = subport->queue_extra + qindex;
-	uint32_t pkt_len = pkt->pkt_len;
 
-	qe->stats.n_pkts_dropped += 1;
-	qe->stats.n_bytes_dropped += pkt_len;
-#ifdef RTE_SCHED_RED
-	qe->stats.n_pkts_red_dropped += red;
-#endif
+	qe->stats.n_pkts_dropped += n_pkts_dropped;
+	qe->stats.n_bytes_dropped += n_bytes_dropped;
 }
 
 #endif /* RTE_SCHED_COLLECT_STATS */
@@ -1725,10 +1700,10 @@ rte_sched_port_enqueue_qwa(struct rte_sched_port *port,
 		     (qlen >= qsize))) {
 		rte_pktmbuf_free(pkt);
 #ifdef RTE_SCHED_COLLECT_STATS
-		rte_sched_port_update_subport_stats_on_drop(port, subport,
-			qindex, pkt, qlen < qsize);
-		rte_sched_port_update_queue_stats_on_drop(subport, qindex, pkt,
-			qlen < qsize);
+		rte_sched_port_update_subport_stats_on_drops(port, subport,
+			qindex, 1, pkt->pkt_len);
+		rte_sched_port_update_queue_stats_on_drops(subport, qindex, 1,
+			pkt->pkt_len);
 #endif
 		return 0;
 	}

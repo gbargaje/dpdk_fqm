@@ -205,11 +205,6 @@ struct rte_sched_subport_stats {
 
 	/** Number of bytes dropped for each traffic class */
 	uint64_t n_bytes_tc_dropped[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE];
-
-#ifdef RTE_SCHED_RED
-	/** Number of packets dropped by red */
-	uint64_t n_pkts_red_dropped[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE];
-#endif
 };
 
 /** Queue statistics */
@@ -219,11 +214,6 @@ struct rte_sched_queue_stats {
 
 	/** Packets dropped */
 	uint64_t n_pkts_dropped;
-
-#ifdef RTE_SCHED_RED
-	/** Packets dropped by RED */
-	uint64_t n_pkts_red_dropped;
-#endif
 
 	/** Bytes successfully written */
 	uint64_t n_bytes;
