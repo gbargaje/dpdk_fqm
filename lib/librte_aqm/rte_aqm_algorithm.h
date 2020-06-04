@@ -17,7 +17,14 @@ extern "C" {
 #endif
 
 enum rte_aqm_algorithm {
-	RTE_AQM_FIFO
+	RTE_AQM_FIFO,
+	RTE_AQM_RED
+};
+
+struct rte_aqm_red_params {
+};
+
+struct rte_aqm_red_stats {
 };
 
 #ifdef __cplusplus
