@@ -27,6 +27,10 @@
 uint32_t active_queues[RTE_SCHED_QUEUES_PER_PIPE];
 uint32_t n_active_queues;
 
+#ifdef RTE_SCHED_AQM
+struct rte_aqm_red_params aqm_red_params;
+#endif
+
 int
 cfg_load_port(struct rte_cfgfile *cfg, struct rte_sched_port_params *port_params)
 {
@@ -159,7 +163,7 @@ cfg_load_subport(struct rte_cfgfile *cfg, struct rte_sched_subport_params *subpo
 	memset(active_queues, 0, sizeof(active_queues));
 	n_active_queues = 0;
 
-#ifdef RTE_SCHED_RED
+#ifdef RTE_SCHED_AQM
 	char sec_name[CFG_NAME_LEN];
 	struct rte_red_params red_params[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE][RTE_COLORS];
 
@@ -232,7 +236,7 @@ cfg_load_subport(struct rte_cfgfile *cfg, struct rte_sched_subport_params *subpo
 			}
 		}
 	}
-#endif /* RTE_SCHED_RED */
+#endif /* RTE_SCHED_AQM */
 
 	for (i = 0; i < MAX_SCHED_SUBPORTS; i++) {
 		char sec_name[CFG_NAME_LEN];
@@ -374,25 +378,16 @@ cfg_load_subport(struct rte_cfgfile *cfg, struct rte_sched_subport_params *subpo
 					}
 				}
 			}
-#ifdef RTE_SCHED_RED
-			for (j = 0; j < RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE; j++) {
-				for (k = 0; k < RTE_COLORS; k++) {
-					subport_params[i].red_params[j][k].min_th =
-						red_params[j][k].min_th;
-					subport_params[i].red_params[j][k].max_th =
-						red_params[j][k].max_th;
-					subport_params[i].red_params[j][k].maxp_inv =
-						red_params[j][k].maxp_inv;
-					subport_params[i].red_params[j][k].wq_log2 =
-						red_params[j][k].wq_log2;
-				}
-			}
-#endif
 #ifdef RTE_SCHED_AQM
 			struct rte_aqm_params aqm_params;
 
-			aqm_params.algorithm = RTE_AQM_FIFO;
-			aqm_params.algorithm_params = NULL;
+			aqm_red_params.params.min_th = red_params[0][0].min_th;
+			aqm_red_params.params.max_th = red_params[0][0].max_th;
+			aqm_red_params.params.maxp_inv = red_params[0][0].maxp_inv;
+			aqm_red_params.params.wq_log2 =	red_params[0][0].wq_log2;
+
+			aqm_params.algorithm = RTE_AQM_RED;
+			aqm_params.algorithm_params = &aqm_red_params;
 
 			for (j = 0; j < RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE; j++) {
 				subport_params[i].aqm_params[j] = aqm_params;
