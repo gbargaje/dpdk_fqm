@@ -18,13 +18,20 @@ extern "C" {
 
 enum rte_aqm_algorithm {
 	RTE_AQM_FIFO,
-	RTE_AQM_RED
+	RTE_AQM_RED,
+	RTE_AQM_WRED
 };
 
 struct rte_aqm_red_params {
 };
 
 struct rte_aqm_red_stats {
+};
+
+struct rte_aqm_wred_params {
+};
+
+struct rte_aqm_wred_stats {
 };
 
 #ifdef __cplusplus

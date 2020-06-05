@@ -9,6 +9,7 @@
 #include <rte_mbuf.h>
 
 #include "aqm_red.h"
+#include "aqm_wred.h"
 #include "circular_queue.h"
 #include "rte_aqm_algorithm.h"
 
@@ -40,6 +41,10 @@ size_t rte_aqm_get_memory_size(enum rte_aqm_algorithm algorithm)
 
 		case RTE_AQM_RED:
 			memory_size += aqm_red_get_memory_size();
+			break;
+
+		case RTE_AQM_WRED:
+			memory_size += aqm_wred_get_memory_size();
 			break;
 
 		default:
@@ -80,6 +85,9 @@ int rte_aqm_init(void *memory, struct rte_aqm_params *params,
 
 		case RTE_AQM_RED:
 			return aqm_red_init(memory, params->algorithm_params);
+
+		case RTE_AQM_WRED:
+			return aqm_wred_init(memory, params->algorithm_params);
 
 		default:
 			RTE_LOG(ERR, AQM, "%s: unknown algorithm\n", __func__);
@@ -155,6 +163,10 @@ int rte_aqm_enqueue(void *memory, struct rte_mbuf *pkt)
 			ret = aqm_red_enqueue(memory, cq, pkt);
 			break;
 
+		case RTE_AQM_WRED:
+			ret = aqm_wred_enqueue(memory, cq, pkt);
+			break;
+
 		default:
 			RTE_LOG(ERR, AQM, "%s: unknown algorithm\n", __func__);
 			return -1;
@@ -202,6 +214,11 @@ int rte_aqm_dequeue(void *memory, struct rte_mbuf **pkt,
 		case RTE_AQM_RED:
 			ret = aqm_red_dequeue(memory, cq, pkt, n_pkts_dropped,
 					      n_bytes_dropped);
+			break;
+
+		case RTE_AQM_WRED:
+			ret = aqm_wred_dequeue(memory, cq, pkt, n_pkts_dropped,
+					       n_bytes_dropped);
 			break;
 
 		default:
@@ -257,6 +274,10 @@ int rte_aqm_get_stats(void *memory, struct rte_aqm_stats *stats)
 			return aqm_red_get_stats(memory,
 						 stats->algorithm_stats);
 
+		case RTE_AQM_WRED:
+			return aqm_wred_get_stats(memory,
+						  stats->algorithm_stats);
+
 		default:
 			RTE_LOG(ERR, AQM, "%s: unknown algorithm\n", __func__);
 			return -1;
@@ -286,6 +307,9 @@ int rte_aqm_destroy(void *memory)
 
 		case RTE_AQM_RED:
 			return aqm_red_destroy(memory);
+
+		case RTE_AQM_WRED:
+			return aqm_wred_destroy(memory);
 
 		default:
 			RTE_LOG(ERR, AQM, "%s: unknown algorithm\n", __func__);

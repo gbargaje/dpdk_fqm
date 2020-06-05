@@ -2,7 +2,7 @@
 # Copyright(c) 2020 NITK Surathkal
 
 sources = files('circular_queue.c', 'rte_aqm.c',
-		'aqm_red.c',
+		'aqm_red.c', 'aqm_wred.c',
 		'rte_red.c')
 headers = files('rte_aqm.h', 'rte_aqm_algorithm.h',
 		'rte_red.h')
