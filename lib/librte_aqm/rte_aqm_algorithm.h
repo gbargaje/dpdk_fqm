@@ -12,6 +12,8 @@
 
 #include <stdint.h>
 
+#include "rte_red.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -25,9 +27,11 @@ enum rte_aqm_algorithm {
 };
 
 struct rte_aqm_red_params {
+	struct rte_red_params params;
 };
 
 struct rte_aqm_red_stats {
+	/* TODO: add stats if required */
 };
 
 struct rte_aqm_wred_params {
