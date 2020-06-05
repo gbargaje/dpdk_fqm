@@ -19,7 +19,8 @@ extern "C" {
 enum rte_aqm_algorithm {
 	RTE_AQM_FIFO,
 	RTE_AQM_RED,
-	RTE_AQM_WRED
+	RTE_AQM_WRED,
+	RTE_AQM_PIE
 };
 
 struct rte_aqm_red_params {
@@ -32,6 +33,12 @@ struct rte_aqm_wred_params {
 };
 
 struct rte_aqm_wred_stats {
+};
+
+struct rte_aqm_pie_params {
+};
+
+struct rte_aqm_pie_stats {
 };
 
 #ifdef __cplusplus

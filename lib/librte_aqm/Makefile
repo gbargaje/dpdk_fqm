@@ -13,6 +13,7 @@ EXPORT_MAP := rte_aqm_version.map
 
 SRCS-$(CONFIG_RTE_LIBRTE_AQM) := circular_queue.c rte_aqm.c
 SRCS-$(CONFIG_RTE_LIBRTE_AQM) += aqm_red.c aqm_wred.c
+SRCS-$(CONFIG_RTE_LIBRTE_AQM) += aqm_pie.c
 SRCS-$(CONFIG_RTE_LIBRTE_AQM) += rte_red.c
 
 SYMLINK-$(CONFIG_RTE_LIBRTE_AQM)-include := rte_aqm.h rte_aqm_algorithm.h
