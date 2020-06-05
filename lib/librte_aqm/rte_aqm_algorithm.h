@@ -20,7 +20,8 @@ enum rte_aqm_algorithm {
 	RTE_AQM_FIFO,
 	RTE_AQM_RED,
 	RTE_AQM_WRED,
-	RTE_AQM_PIE
+	RTE_AQM_PIE,
+	RTE_AQM_CODEL
 };
 
 struct rte_aqm_red_params {
@@ -39,6 +40,12 @@ struct rte_aqm_pie_params {
 };
 
 struct rte_aqm_pie_stats {
+};
+
+struct rte_aqm_codel_params {
+};
+
+struct rte_aqm_codel_stats {
 };
 
 #ifdef __cplusplus

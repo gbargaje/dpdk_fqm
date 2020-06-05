@@ -8,6 +8,7 @@
 #include <rte_log.h>
 #include <rte_mbuf.h>
 
+#include "aqm_codel.h"
 #include "aqm_pie.h"
 #include "aqm_red.h"
 #include "aqm_wred.h"
@@ -50,6 +51,10 @@ size_t rte_aqm_get_memory_size(enum rte_aqm_algorithm algorithm)
 
 		case RTE_AQM_PIE:
 			memory_size += aqm_pie_get_memory_size();
+			break;
+
+		case RTE_AQM_CODEL:
+			memory_size += aqm_codel_get_memory_size();
 			break;
 
 		default:
@@ -96,6 +101,9 @@ int rte_aqm_init(void *memory, struct rte_aqm_params *params,
 
 		case RTE_AQM_PIE:
 			return aqm_pie_init(memory, params->algorithm_params);
+
+		case RTE_AQM_CODEL:
+			return aqm_codel_init(memory, params->algorithm_params);
 
 		default:
 			RTE_LOG(ERR, AQM, "%s: unknown algorithm\n", __func__);
@@ -179,6 +187,10 @@ int rte_aqm_enqueue(void *memory, struct rte_mbuf *pkt)
 			ret = aqm_pie_enqueue(memory, cq, pkt);
 			break;
 
+		case RTE_AQM_CODEL:
+			ret = aqm_codel_enqueue(memory, cq, pkt);
+			break;
+
 		default:
 			RTE_LOG(ERR, AQM, "%s: unknown algorithm\n", __func__);
 			return -1;
@@ -236,6 +248,11 @@ int rte_aqm_dequeue(void *memory, struct rte_mbuf **pkt,
 		case RTE_AQM_PIE:
 			ret = aqm_pie_dequeue(memory, cq, pkt, n_pkts_dropped,
 					      n_bytes_dropped);
+			break;
+
+		case RTE_AQM_CODEL:
+			ret = aqm_codel_dequeue(memory, cq, pkt, n_pkts_dropped,
+						n_bytes_dropped);
 			break;
 
 		default:
@@ -299,6 +316,10 @@ int rte_aqm_get_stats(void *memory, struct rte_aqm_stats *stats)
 			return aqm_pie_get_stats(memory,
 						 stats->algorithm_stats);
 
+		case RTE_AQM_CODEL:
+			return aqm_codel_get_stats(memory,
+						   stats->algorithm_stats);
+
 		default:
 			RTE_LOG(ERR, AQM, "%s: unknown algorithm\n", __func__);
 			return -1;
@@ -334,6 +355,9 @@ int rte_aqm_destroy(void *memory)
 
 		case RTE_AQM_PIE:
 			return aqm_pie_destroy(memory);
+
+		case RTE_AQM_CODEL:
+			return aqm_codel_destroy(memory);
 
 		default:
 			RTE_LOG(ERR, AQM, "%s: unknown algorithm\n", __func__);
