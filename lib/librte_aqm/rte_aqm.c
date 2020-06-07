@@ -137,7 +137,7 @@ void rte_aqm_prefetch_head(void *memory)
 
 	cq = (void *)((uint8_t *)memory + sizeof(struct rte_aqm));
 
-	circular_queue_prefecth_head(cq);
+	circular_queue_prefetch_head(cq);
 
 	return;
 }
@@ -148,7 +148,7 @@ void rte_aqm_prefetch_tail(void *memory)
 
 	cq = (void *)((uint8_t *)memory + sizeof(struct rte_aqm));
 
-	circular_queue_prefecth_tail(cq);
+	circular_queue_prefetch_tail(cq);
 
 	return;
 }
