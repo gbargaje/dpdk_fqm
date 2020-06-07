@@ -33,9 +33,9 @@ uint8_t circular_queue_is_empty(struct circular_queue *cq);
 
 uint8_t circular_queue_is_full(struct circular_queue *cq);
 
-void circular_queue_prefecth_head(struct circular_queue *cq);
+void circular_queue_prefetch_head(struct circular_queue *cq);
 
-void circular_queue_prefecth_tail(struct circular_queue *cq);
+void circular_queue_prefetch_tail(struct circular_queue *cq);
 
 int circular_queue_enqueue(struct circular_queue *cq, struct rte_mbuf *pkt);
 

@@ -57,14 +57,14 @@ uint8_t circular_queue_is_full(struct circular_queue *cq)
 	return cq->length_pkts == cq->limit;
 }
 
-void circular_queue_prefecth_head(struct circular_queue *cq)
+void circular_queue_prefetch_head(struct circular_queue *cq)
 {
 	rte_prefetch0(cq->queue_base + cq->head);
 
 	return;
 }
 
-void circular_queue_prefecth_tail(struct circular_queue *cq)
+void circular_queue_prefetch_tail(struct circular_queue *cq)
 {
 	rte_prefetch0(cq->queue_base + cq->tail);
 
