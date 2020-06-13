@@ -28,11 +28,11 @@ size_t aqm_pie_get_memory_size(void);
 int aqm_pie_init(struct aqm_pie *pie, struct rte_aqm_pie_params *params);
 
 int aqm_pie_enqueue(struct aqm_pie *pie, struct circular_queue *cq,
-		    struct rte_mbuf *pkt);
+			struct rte_mbuf *pkt);
 
 int aqm_pie_dequeue(struct aqm_pie *pie, struct circular_queue *cq,
-		    struct rte_mbuf **pkt, uint16_t *n_pkts_dropped,
-		    uint32_t *n_bytes_dropped);
+			struct rte_mbuf **pkt, uint16_t *n_pkts_dropped,
+			uint32_t *n_bytes_dropped);
 
 int aqm_pie_get_stats(struct aqm_pie *pie, struct rte_aqm_pie_stats *stats);
 

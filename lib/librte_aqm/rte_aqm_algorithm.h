@@ -14,6 +14,7 @@
 
 #include "rte_red.h"
 #include "rte_codel.h"
+#include "rte_pie.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,6 +43,7 @@ struct rte_aqm_wred_stats {
 };
 
 struct rte_aqm_pie_params {
+	struct rte_pie_params params;
 };
 
 struct rte_aqm_pie_stats {
