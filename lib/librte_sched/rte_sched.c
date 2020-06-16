@@ -1816,11 +1816,19 @@ rte_sched_port_enqueue_qwa_prefetch0(struct rte_sched_port *port,
 
 static inline int
 #ifdef RTE_SCHED_AQM
+#ifdef RTE_SCHED_COLLECT_STATS
 rte_sched_port_enqueue_qwa(struct rte_sched_port *port,
 	struct rte_sched_subport *subport,
 	uint32_t qindex,
 	__rte_unused struct rte_mbuf **qbase,
 	struct rte_mbuf *pkt)
+#else
+rte_sched_port_enqueue_qwa(__rte_unused struct rte_sched_port *port,
+	struct rte_sched_subport *subport,
+	uint32_t qindex,
+	__rte_unused struct rte_mbuf **qbase,
+	struct rte_mbuf *pkt)
+#endif
 #else
 rte_sched_port_enqueue_qwa(struct rte_sched_port *port,
 	struct rte_sched_subport *subport,
@@ -2752,8 +2760,13 @@ grinder_prefetch_tc_queue_arrays(struct rte_sched_subport *subport, uint32_t pos
 
 static inline void
 #ifdef RTE_SCHED_AQM
+#ifdef RTE_SCHED_COLLECT_STATS
 grinder_prefetch_mbuf(struct rte_sched_port *port,
 		      struct rte_sched_subport *subport, uint32_t pos)
+#else
+grinder_prefetch_mbuf(__rte_unused struct rte_sched_port *port,
+		      struct rte_sched_subport *subport, uint32_t pos)
+#endif
 #else
 grinder_prefetch_mbuf(struct rte_sched_subport *subport, uint32_t pos)
 #endif
@@ -2777,10 +2790,12 @@ grinder_prefetch_mbuf(struct rte_sched_subport *subport, uint32_t pos)
 				   &n_bytes_dropped) != 0) {
 		grinder->pkt = qbase[0];
 	} else {
+#ifdef RTE_SCHED_COLLECT_STATS
 		rte_sched_port_update_subport_stats_on_drops(port, subport,
 			grinder->qindex[qpos], n_pkts_dropped, n_bytes_dropped);
 		rte_sched_port_update_queue_stats_on_drops(subport,
 			grinder->qindex[qpos], n_pkts_dropped, n_bytes_dropped);
+#endif
 
 		grinder->pkt = pkt;
 		*grinder->last_dq_pkt[qpos] = pkt;
