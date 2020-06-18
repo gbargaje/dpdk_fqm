@@ -34,8 +34,8 @@ struct rte_pie_params {
 	uint32_t mean_pkt_size;	/**< Enqueue the packet if number of packets in 
 				queue <= mean_pkt_size (in number of packets) */
 	uint32_t max_burst;	/**< Max Burst Allowance (default: 150ms) */
-	float alpha;		/**< (default: 1/8) */
-	float beta;		/**< (default: 1 + 1/4) */
+	uint32_t alpha;		/**< (default: 1/8) */
+	uint32_t beta;		/**< (default: 1 + 1/4) */
 };
 
 /**
@@ -59,6 +59,7 @@ struct rte_pie_rt {
 	uint64_t old_qdelay;	  /**< The previous queue delay estimate. Reset to 0 */
 	uint64_t cur_qdelay;	  /**< The current queue delay estimate */
 	uint64_t accu_prob;	  /**< Accumulated drop probability. Reset to 0 */
+	struct rte_timer *pie_timer;
 };
 
 

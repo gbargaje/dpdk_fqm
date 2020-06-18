@@ -13,7 +13,6 @@
 #include "main.h"
 
 #ifdef RTE_SCHED_AQM
-#include <rte_aqm.h>
 #include <rte_aqm_algorithm.h>
 #endif
 
@@ -29,6 +28,8 @@ uint32_t n_active_queues;
 
 #ifdef RTE_SCHED_AQM
 struct rte_aqm_red_params aqm_red_params;
+struct rte_aqm_pie_params aqm_pie_params;
+struct rte_aqm_codel_params aqm_codel_params;
 #endif
 
 int
@@ -165,12 +166,15 @@ cfg_load_subport(struct rte_cfgfile *cfg, struct rte_sched_subport_params *subpo
 
 #ifdef RTE_SCHED_AQM
 	char sec_name[CFG_NAME_LEN];
+	struct rte_aqm_params aqm_params;
+	struct rte_pie_params pie_params[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE][RTE_COLORS];
 	struct rte_red_params red_params[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE][RTE_COLORS];
+	struct rte_codel_params codel_params[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE][RTE_COLORS];
 
 	snprintf(sec_name, sizeof(sec_name), "red");
 
 	if (rte_cfgfile_has_section(cfg, sec_name)) {
-
+		aqm_params.algorithm = RTE_AQM_RED;
 		for (i = 0; i < RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++) {
 			char str[32];
 
@@ -191,7 +195,7 @@ cfg_load_subport(struct rte_cfgfile *cfg, struct rte_sched_subport_params *subpo
 
 			/* Parse WRED max thresholds */
 			snprintf(str, sizeof(str), "tc %d wred max", i);
-			entry = rte_cfgfile_get_entry(cfg, "red", str);
+			entry = rte_cfgfile_get_entry(cfg, sec_name, str);
 			if (entry) {
 				char *next;
 				/* for each packet colour (green, yellow, red) */
@@ -206,7 +210,7 @@ cfg_load_subport(struct rte_cfgfile *cfg, struct rte_sched_subport_params *subpo
 
 			/* Parse WRED inverse mark probabilities */
 			snprintf(str, sizeof(str), "tc %d wred inv prob", i);
-			entry = rte_cfgfile_get_entry(cfg, "red", str);
+			entry = rte_cfgfile_get_entry(cfg, sec_name, str);
 			if (entry) {
 				char *next;
 				/* for each packet colour (green, yellow, red) */
@@ -220,9 +224,8 @@ cfg_load_subport(struct rte_cfgfile *cfg, struct rte_sched_subport_params *subpo
 				}
 			}
 
-			/* Parse WRED EWMA filter weights */
 			snprintf(str, sizeof(str), "tc %d wred weight", i);
-			entry = rte_cfgfile_get_entry(cfg, "red", str);
+			entry = rte_cfgfile_get_entry(cfg, sec_name, str);
 			if (entry) {
 				char *next;
 				/* for each packet colour (green, yellow, red) */
@@ -236,6 +239,139 @@ cfg_load_subport(struct rte_cfgfile *cfg, struct rte_sched_subport_params *subpo
 			}
 		}
 	}
+
+	snprintf(sec_name, sizeof(sec_name), "codel");
+
+	if (rte_cfgfile_has_section(cfg, sec_name)) {
+		aqm_params.algorithm = RTE_AQM_CODEL;
+		for (i = 0; i < RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++) {
+			char str[32];	
+
+			snprintf(str, sizeof(str), "tc %d codel target", i);
+			entry = rte_cfgfile_get_entry(cfg, sec_name, str);
+			if (entry) {
+				char *next;
+				/* for each packet colour (green, yellow, red) */
+				for (j = 0; j < RTE_COLORS; j++) {
+					codel_params[i][j].target
+						= (uint8_t)strtol(entry, &next, 10);
+
+					if (next == NULL)
+						break;
+					entry = next;
+				}
+			}
+
+			snprintf(str, sizeof(str), "tc %d codel interval", i);
+			entry = rte_cfgfile_get_entry(cfg, sec_name, str);
+			if (entry) {
+				char *next;
+				/* for each packet colour (green, yellow, red) */
+				for (j = 0; j < RTE_COLORS; j++) {
+					codel_params[i][j].interval
+						= (uint8_t)strtol(entry, &next, 10);
+					if (next == NULL)
+						break;
+					entry = next;
+				}
+			}
+		}
+	}
+
+	snprintf(sec_name, sizeof(sec_name), "pie");
+
+	if (rte_cfgfile_has_section(cfg, sec_name)) {
+		aqm_params.algorithm = RTE_AQM_RED;
+		for (i = 0; i < RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++) {
+			char str[32];
+
+			snprintf(str, sizeof(str), "tc %d pie target_delay", i);
+			entry = rte_cfgfile_get_entry(cfg, sec_name, str);
+			if (entry) {
+				char *next;
+				/* for each packet colour (green, yellow, red) */
+				for (j = 0; j < RTE_COLORS; j++) {
+					pie_params[i][j].target_delay
+						= (uint16_t)strtol(entry, &next, 10);
+					if (next == NULL)
+						break;
+					entry = next;
+				}
+			}
+
+			snprintf(str, sizeof(str), "tc %d pie t_update", i);
+			entry = rte_cfgfile_get_entry(cfg, sec_name, str);
+			if (entry) {
+				char *next;
+				/* for each packet colour (green, yellow, red) */
+				for (j = 0; j < RTE_COLORS; j++) {
+					pie_params[i][j].t_update
+						= (uint16_t)strtol(entry, &next, 10);
+					if (next == NULL)
+						break;
+					entry = next;
+				}
+			}
+
+			snprintf(str, sizeof(str), "tc %d pie alpha", i);
+			entry = rte_cfgfile_get_entry(cfg, sec_name, str);
+			if (entry) {
+				char *next;
+				/* for each packet colour (green, yellow, red) */
+				for (j = 0; j < RTE_COLORS; j++) {
+					pie_params[i][j].alpha
+						= (uint8_t)strtol(entry, &next, 10);
+
+					if (next == NULL)
+						break;
+					entry = next;
+				}
+			}
+
+			snprintf(str, sizeof(str), "tc %d pie beta", i);
+			entry = rte_cfgfile_get_entry(cfg, sec_name, str);
+			if (entry) {
+				char *next;
+				/* for each packet colour (green, yellow, red) */
+				for (j = 0; j < RTE_COLORS; j++) {
+					pie_params[i][j].beta
+						= (uint8_t)strtol(entry, &next, 10);
+					if (next == NULL)
+						break;
+					entry = next;
+				}
+			}
+
+			snprintf(str, sizeof(str), "tc %d pie mean_pkt_size", i);
+			entry = rte_cfgfile_get_entry(cfg, sec_name, str);
+			if (entry) {
+				char *next;
+				/* for each packet colour (green, yellow, red) */
+				for (j = 0; j < RTE_COLORS; j++) {
+					pie_params[i][j].mean_pkt_size
+						= (uint8_t)strtol(entry, &next, 10);
+					if (next == NULL)
+						break;
+					entry = next;
+				}
+			}
+
+			snprintf(str, sizeof(str), "tc %d pie max_burst", i);
+			entry = rte_cfgfile_get_entry(cfg, sec_name, str);
+			if (entry) {
+				char *next;
+				/* for each packet colour (green, yellow, red) */
+				for (j = 0; j < RTE_COLORS; j++) {
+					pie_params[i][j].max_burst
+						= (uint8_t)strtol(entry, &next, 10);
+					if (next == NULL)
+						break;
+					entry = next;
+				}
+			}
+		}
+	}
+
 #endif /* RTE_SCHED_AQM */
 
 	for (i = 0; i < MAX_SCHED_SUBPORTS; i++) {
@@ -379,15 +515,38 @@ cfg_load_subport(struct rte_cfgfile *cfg, struct rte_sched_subport_params *subpo
 				}
 			}
 #ifdef RTE_SCHED_AQM
-			struct rte_aqm_params aqm_params;
-
 			aqm_red_params.params.min_th = red_params[0][0].min_th;
 			aqm_red_params.params.max_th = red_params[0][0].max_th;
 			aqm_red_params.params.maxp_inv = red_params[0][0].maxp_inv;
 			aqm_red_params.params.wq_log2 =	red_params[0][0].wq_log2;
 
-			aqm_params.algorithm = RTE_AQM_RED;
-			aqm_params.algorithm_params = &aqm_red_params;
+			/* copy codel params into the structure */
+			aqm_codel_params.params.interval = codel_params[0][0].interval;
+			aqm_codel_params.params.target = codel_params[0][0].target;
+		
+			/* copy pie params into the structure */
+			aqm_pie_params.params.target_delay = pie_params[0][0].target_delay;
+			aqm_pie_params.params.t_update = pie_params[0][0].t_update;
+			aqm_pie_params.params.mean_pkt_size = pie_params[0][0].mean_pkt_size;
+			aqm_pie_params.params.max_burst = pie_params[0][0].max_burst;
+			aqm_pie_params.params.alpha = pie_params[0][0].alpha;
+			aqm_pie_params.params.beta = pie_params[0][0].beta;
+
+			switch(aqm_params.algorithm) {
+				case RTE_AQM_RED:
+					aqm_params.algorithm_params = &aqm_red_params;
+					break;
+				case RTE_AQM_CODEL:
+					aqm_params.algorithm_params = &aqm_codel_params;
+					break;
+				case RTE_AQM_PIE:
+					aqm_params.algorithm_params = &aqm_pie_params;
+					break;
+				case RTE_AQM_WRED:
+					break;
+				case RTE_AQM_FIFO:
+					break;
+			}
 
 			for (j = 0; j < RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE; j++) {
 				subport_params[i].aqm_params[j] = aqm_params;
