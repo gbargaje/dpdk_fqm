@@ -28,6 +28,7 @@ struct rte_aqm {
 	uint64_t pkts_dequeued;
 	uint64_t bytes_enqueued;
 	uint64_t pkts_enqueued;
+	uint64_t queue_delay;
 	enum rte_aqm_algorithm algorithm;
 };
 
@@ -170,6 +171,8 @@ int rte_aqm_enqueue(void *memory, struct rte_mbuf *pkt)
 		return 1;
 	}
 
+	pkt->timestamp = rte_get_tsc_cycles();
+
 	switch (ra->algorithm) {
 		case RTE_AQM_FIFO:
 			ret = circular_queue_enqueue(cq, pkt);
@@ -267,6 +270,7 @@ int rte_aqm_dequeue(void *memory, struct rte_mbuf **pkt,
 
 	ra->bytes_dropped_dequeue += *n_bytes_dropped;
 	ra->pkts_dropped_dequeue += *n_pkts_dropped;
+	ra->queue_delay = rte_get_tsc_cycles() - pkt->timestamp;
 
 	if (ret == 0) {
 		ra->bytes_dequeued += (*pkt)->pkt_len;
