@@ -55,6 +55,7 @@ int aqm_codel_init(struct aqm_codel *codel, struct rte_aqm_codel_params *params)
 {
 	struct rte_codel_params *codel_params = &params->params;
 	struct rte_codel_config *config = &codel->codel_config;
+	struct rte_codel_rt *codel_rt = &codel->codel_rt;
 
 	if (config == NULL)
 		return -1;
@@ -66,6 +67,16 @@ int aqm_codel_init(struct aqm_codel *codel, struct rte_aqm_codel_params *params)
 	uint64_t cycles 		= rte_get_timer_hz();
 	config->target 			= codel_params->target * cycles / 1000u;	//5000ul = 5ms in microseconds
 	config->interval		= codel_params->interval * cycles / 1000u;	//10000ul = 100ms in microseconds
+
+	if (codel_rt == NULL)
+		return -1;
+
+	codel_rt->first_above_time 				= 0;
+	codel_rt->drop_next 					= 0;
+	codel_rt->count 						= 0;
+	codel_rt->lastcount 					= 0;
+	codel_rt->ok_to_drop 					= CODEL_DEQUEUE;
+	codel_rt->dropping_state 				= false;
 
 	return 0;
 }
@@ -96,7 +107,7 @@ codel_control_law(u_int64_t t,
 	u_int32_t rec_inv_sqrt)
 {
 	return (t + (u_int32_t)(((u_int64_t)interval *
-	    (rec_inv_sqrt << REC_INV_SQRT_SHIFT)) >> 32));
+		(rec_inv_sqrt << REC_INV_SQRT_SHIFT)) >> 32));
 }
 
 int
