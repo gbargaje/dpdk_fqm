@@ -270,7 +270,7 @@ int rte_aqm_dequeue(void *memory, struct rte_mbuf **pkt,
 
 	ra->bytes_dropped_dequeue += *n_bytes_dropped;
 	ra->pkts_dropped_dequeue += *n_pkts_dropped;
-	ra->queue_delay = rte_get_tsc_cycles() - pkt->timestamp;
+	ra->queue_delay = rte_get_tsc_cycles() - (*pkt)->timestamp;
 
 	if (ret == 0) {
 		ra->bytes_dequeued += (*pkt)->pkt_len;
@@ -301,6 +301,7 @@ int rte_aqm_get_stats(void *memory, struct rte_aqm_stats *stats)
 	stats->pkts_dequeued = ra->pkts_dequeued;
 	stats->bytes_enqueued = ra->bytes_enqueued;
 	stats->pkts_enqueued = ra->pkts_enqueued;
+	stats->queue_delay = ra->queue_delay;
 	stats->length_bytes = circular_queue_get_length_bytes(cq);
 	stats->length_pkts = circular_queue_get_length_pkts(cq);
 
