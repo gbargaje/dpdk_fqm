@@ -12,6 +12,7 @@
 
 struct circular_queue {
 	struct rte_mbuf **queue_base;
+	uint64_t queue_delay_ns;
 	uint32_t length_bytes;
 	uint16_t length_pkts;
 	uint16_t limit;
@@ -28,6 +29,7 @@ void circular_queue_init(struct circular_queue *cq,
 			 struct rte_mbuf **queue_base, uint16_t limit)
 {
 	cq->queue_base = queue_base;
+	cq->queue_delay_ns = 0;
 	cq->length_bytes = 0;
 	cq->length_pkts = 0;
 	cq->limit = limit;
@@ -45,6 +47,11 @@ uint16_t circular_queue_get_length_pkts(struct circular_queue *cq)
 uint32_t circular_queue_get_length_bytes(struct circular_queue *cq)
 {
 	return cq->length_bytes;
+}
+
+uint64_t circular_queue_get_queue_delay(struct circular_queue *cq)
+{
+	return cq->queue_delay_ns;
 }
 
 uint8_t circular_queue_is_empty(struct circular_queue *cq)
@@ -74,7 +81,7 @@ void circular_queue_prefetch_tail(struct circular_queue *cq)
 int circular_queue_enqueue(struct circular_queue *cq, struct rte_mbuf *pkt)
 {
 	cq->queue_base[cq->tail++] = pkt;
-
+	pkt->timestamp = rte_get_tsc_cycles();
 	if (unlikely(cq->tail == cq->limit))
 		cq->tail = 0;
 
@@ -93,6 +100,8 @@ int circular_queue_dequeue(struct circular_queue *cq, struct rte_mbuf **pkt)
 
 	cq->length_pkts--;
 	cq->length_bytes -= (*pkt)->pkt_len;
-
+	uint64_t cycles = rte_get_timer_hz();
+	uint64_t now = rte_get_tsc_cycles();
+	cq->queue_delay_ns = (1000000ULL*(now-(*pkt)->timestamp))/cycles;
 	return 0;
 }

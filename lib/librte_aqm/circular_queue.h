@@ -29,6 +29,8 @@ uint16_t circular_queue_get_length_pkts(struct circular_queue *cq);
 
 uint32_t circular_queue_get_length_bytes(struct circular_queue *cq);
 
+uint64_t circular_queue_get_queue_delay(struct circular_queue *cq);
+
 uint8_t circular_queue_is_empty(struct circular_queue *cq);
 
 uint8_t circular_queue_is_full(struct circular_queue *cq);

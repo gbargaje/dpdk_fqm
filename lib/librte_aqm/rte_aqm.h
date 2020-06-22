@@ -38,6 +38,7 @@ struct rte_aqm_stats {
 	uint64_t pkts_enqueued;
 	uint32_t length_bytes;
 	uint16_t length_pkts;
+	uint64_t queue_delay;
 	void *algorithm_stats;
 };
 
