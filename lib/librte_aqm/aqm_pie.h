@@ -145,7 +145,6 @@ rte_pie_calc_drop_prob(__attribute__((unused)) struct rte_timer *tim,
 			pie_rt->drop_prob = PIE_MAX_PROB;
 		}
 	}
-	pie_rt->drop_prob += p;
 
 	if (pie_rt->drop_prob < 0) {
 		pie_rt->drop_prob = 0;

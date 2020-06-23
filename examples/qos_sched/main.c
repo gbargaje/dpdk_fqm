@@ -13,6 +13,7 @@
 #include <rte_memcpy.h>
 #include <rte_byteorder.h>
 #include <rte_branch_prediction.h>
+#include <rte_timer.h>
 
 #include <rte_sched.h>
 
@@ -211,10 +212,26 @@ main(int argc, char **argv)
 		prompt();
 	}
 	else {
-		/* print statistics every second */
+		uint64_t t_prev_tsc = 0, t_cur_tsc, t_diff_tsc;
+		uint64_t s_prev_tsc = 0, s_cur_tsc, s_diff_tsc;
+		/* set the stats interval as 100ms */
+		uint64_t s_interval = rte_get_timer_hz()/10;
+		/* set the timer manage interval as 10ms */
+		uint64_t t_interval = rte_get_timer_hz()/100;
+		/* print statistics every s_interval */
 		while(1) {
-			sleep(1);
-			app_stat();
+			t_cur_tsc = rte_rdtsc();
+			t_diff_tsc = t_cur_tsc - t_prev_tsc;
+			if (t_diff_tsc > t_interval) {
+				rte_timer_manage();
+				t_prev_tsc = t_cur_tsc;
+			}
+			s_cur_tsc = rte_rdtsc();
+			s_diff_tsc = s_cur_tsc - s_prev_tsc;
+			if (s_diff_tsc > s_interval) {
+				app_stat();
+				s_prev_tsc = s_cur_tsc;
+			}
 		}
 	}
 
