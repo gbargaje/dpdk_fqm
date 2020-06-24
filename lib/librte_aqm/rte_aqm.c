@@ -72,7 +72,8 @@ int rte_aqm_init(void *memory, struct rte_aqm_params *params,
 	struct rte_aqm *ra = NULL;
 
 	ra = (struct rte_aqm *)memory;
-	cq = (void *)((uint8_t *)memory + sizeof(struct rte_aqm));
+	memory = (uint8_t *)memory + sizeof(struct rte_aqm);
+	cq = (struct circular_queue *)memory;
 	memory = (uint8_t *)memory + circular_queue_get_memory_size();
 
 	ra->bytes_dropped_overflow = 0;
@@ -160,7 +161,8 @@ int rte_aqm_enqueue(void *memory, struct rte_mbuf *pkt)
 	int ret;
 
 	ra = (struct rte_aqm *)memory;
-	cq = (void *)((uint8_t *)memory + sizeof(struct rte_aqm));
+	memory = (uint8_t *)memory + sizeof(struct rte_aqm);
+	cq = (struct circular_queue *)memory;
 	memory = (uint8_t *)memory + circular_queue_get_memory_size();
 
 	if (unlikely(circular_queue_is_full(cq))) {
@@ -219,7 +221,8 @@ int rte_aqm_dequeue(void *memory, struct rte_mbuf **pkt,
 	int ret;
 
 	ra = (struct rte_aqm *)memory;
-	cq = (void *)((uint8_t *)memory + sizeof(struct rte_aqm));
+	memory = (uint8_t *)memory + sizeof(struct rte_aqm);
+	cq = (struct circular_queue *)memory;
 	memory = (uint8_t *)memory + circular_queue_get_memory_size();
 
 	*n_pkts_dropped = 0;
@@ -284,7 +287,8 @@ int rte_aqm_get_stats(void *memory, struct rte_aqm_stats *stats)
 	struct rte_aqm *ra = NULL;
 
 	ra = (struct rte_aqm *)memory;
-	cq = (void *)((uint8_t *)memory + sizeof(struct rte_aqm));
+	memory = (uint8_t *)memory + sizeof(struct rte_aqm);
+	cq = (struct circular_queue *)memory;
 	memory = (uint8_t *)memory + circular_queue_get_memory_size();
 
 	stats->bytes_dropped_overflow = ra->bytes_dropped_overflow;
@@ -336,7 +340,8 @@ int rte_aqm_destroy(void *memory)
 	struct rte_aqm *ra = NULL;
 
 	ra = (struct rte_aqm *)memory;
-	cq = (void *)((uint8_t *)memory + sizeof(struct rte_aqm));
+	memory = (uint8_t *)memory + sizeof(struct rte_aqm);
+	cq = (struct circular_queue *)memory;
 	memory = (uint8_t *)memory + circular_queue_get_memory_size();
 
 	while(!circular_queue_is_empty(cq)) {
