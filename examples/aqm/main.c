@@ -7,6 +7,7 @@
 #include <signal.h>
 
 #include <rte_aqm.h>
+#include <rte_aqm_algorithm.h>
 #include <rte_eal.h>
 #include <rte_launch.h>
 #include <rte_lcore.h>
@@ -41,6 +42,8 @@ static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 struct rte_mempool *aqm_pktmbuf_pool = NULL;
 
 static struct rte_eth_dev_tx_buffer *tx_buffer[RTE_MAX_ETHPORTS];
+static struct rte_mbuf **queue;
+static void *aqm_memory;
 
 static struct rte_eth_conf default_port_conf = {
 	.rxmode= { .max_rx_pkt_len = RTE_ETHER_MAX_LEN }
@@ -52,6 +55,21 @@ struct aqm_port_statistics {
 	uint64_t dropped;
 	struct rte_aqm_stats aqm_stats;
 } __rte_cache_aligned;
+
+struct port_params {
+	uint32_t rate_bytes;
+	uint32_t qlen_pkts;
+	struct rte_aqm_params aqm_params;
+};
+
+static struct port_params default_params = {
+	.rate_bytes = 1250000,
+	.qlen_pkts = 1024,
+	.aqm_params = {
+		.algorithm = RTE_AQM_FIFO,
+		.algorithm_params = NULL,
+	}
+};
 
 struct aqm_port_statistics port_statistics[RTE_MAX_ETHPORTS];
 
@@ -66,7 +84,7 @@ signal_handler(int signum)
 }
 
 static void port_stat(uint8_t portid) {
-	/* TODO: Stats Parsing */
+	/* TODO: Stats Printing */
 
 	return;
 }
@@ -77,12 +95,16 @@ static void ab_rx(void)
 
 	uint8_t rx_port;
 	uint8_t tx_port;
+	uint16_t n_pkts_dropped;
 	uint32_t nb_rx;
 	uint32_t sent;
 	uint32_t i;
+	uint32_t enq_cnt;
+	uint32_t n_bytes_dropped;
 
 	rx_port = port_a;
 	tx_port = port_b;
+	enq_cnt = 0;
 
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	struct rte_mbuf *m;
@@ -91,16 +113,26 @@ static void ab_rx(void)
 	{
 		nb_rx = rte_eth_rx_burst(rx_port, 0, pkts_burst, MAX_PKT_BURST);
 	
-		if (nb_rx)
+		if (likely(nb_rx))
 		{
 			port_statistics[rx_port].rx += nb_rx;
 
-			for (i = 0; i < nb_rx; ++i) {
+			for (i = 0; i < nb_rx; ++i)
+			{
 				m = pkts_burst[i];
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *));
-				sent = rte_eth_tx_buffer(tx_port, 0, tx_buffer[tx_port], m);
-				if (sent)
-					port_statistics[tx_port].tx += sent;
+				enq_cnt += rte_aqm_enqueue(aqm_memory, m);
+			}
+			for (i = 0; i < nb_rx; ++i)
+			{
+				m = pkts_burst[i];
+				if (rte_aqm_dequeue(aqm_memory, &m, &n_pkts_dropped,
+								&n_bytes_dropped) == 0)
+				{
+					sent = rte_eth_tx_buffer(tx_port, 0, tx_buffer[tx_port], m);
+					if (unlikely(sent))
+						port_statistics[tx_port].tx += sent;
+				}
 			}
 		}
 	}
@@ -128,9 +160,10 @@ static void ab_tx(void)
 		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 
-		if (unlikely(diff_tsc > drain_tsc)) {
+		if (unlikely(diff_tsc > drain_tsc))
+		{
 			sent = rte_eth_tx_buffer_flush(tx_port, 0, tx_buffer[tx_port]);
-			if (sent)
+			if (likely(sent))
 				port_statistics[tx_port].tx += sent;
 		}
 	}
@@ -158,16 +191,17 @@ static void ba_rx(void)
 	{
 		nb_rx = rte_eth_rx_burst(rx_port, 0, pkts_burst, MAX_PKT_BURST);
 		
-		if (nb_rx)
+		if (likely(nb_rx))
 		{
 			port_statistics[rx_port].rx += nb_rx;
 
-			for (i = 0; i < nb_rx; ++i) {
+			for (i = 0; i < nb_rx; ++i)
+			{
 				m = pkts_burst[i];
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *));
 				sent = rte_eth_tx_buffer(tx_port, 0, tx_buffer[tx_port], m);
 
-				if (sent)
+				if (unlikely(sent))
 					port_statistics[tx_port].tx += sent;
 			}
 		}
@@ -198,10 +232,11 @@ static void ba_tx(void)
 		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 
-		if (unlikely(diff_tsc > drain_tsc)) {
+		if (unlikely(diff_tsc > drain_tsc))
+		{
 			sent = rte_eth_tx_buffer_flush(tx_port, 0, tx_buffer[tx_port]);
 
-			if (sent)
+			if (likely(sent))
 				port_statistics[tx_port].tx += sent;
 		}
 	}
@@ -227,7 +262,8 @@ static void stats(void)
 		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 
-		if (unlikely(diff_tsc > stats_tsc)) {
+		if (unlikely(diff_tsc > stats_tsc))
+		{
 			port_stat(port_b);
 		}
 	}
@@ -342,9 +378,14 @@ static int port_init(uint8_t portid)
 int main(int argc, char **argv)
 {
 	int ret;
-	uint16_t nb_ports = 2;
-	unsigned int nb_lcores = 6;
-	unsigned int nb_mbufs;
+	uint16_t nb_ports;
+	uint16_t aqm_memory_size;
+	uint16_t queue_memory_size;
+	uint32_t nb_lcores;
+	uint32_t nb_mbufs;
+
+	nb_ports = 2;
+	nb_lcores = 6;
 
 	force_quit = false;
 	signal(SIGINT, signal_handler);
@@ -378,11 +419,33 @@ int main(int argc, char **argv)
 	if (ret < 0)
 		rte_exit(EXIT_FAILURE, "Failed to initialize port %u\n", port_b);
 
+	aqm_memory_size = rte_aqm_get_memory_size(default_params.aqm_params.algorithm);
+
+	queue_memory_size = default_params.qlen_pkts * sizeof(struct rte_mbuf *);
+
+	queue = (struct rte_mbuf **) rte_zmalloc_socket("qbase", queue_memory_size,
+					RTE_CACHE_LINE_SIZE, rte_eth_dev_socket_id(port_b));
+
+	if (queue == NULL)
+		rte_exit(EXIT_FAILURE, "Failed to allocate queue memory\n");
+
+	aqm_memory = rte_zmalloc_socket("aqm_memory", aqm_memory_size,
+					RTE_CACHE_LINE_SIZE, rte_eth_dev_socket_id(port_b));
+
+	if (queue == NULL)
+		rte_exit(EXIT_FAILURE, "Failed to allocate aqm memory\n");
+
+	if (rte_aqm_init(aqm_memory, &default_params.aqm_params, queue,
+					default_params.qlen_pkts))
+		rte_exit(EXIT_FAILURE, "Failed to initialize AQM\n");
+
 	rte_eal_mp_remote_launch(assign_jobs, NULL, SKIP_MASTER);
 
 	manage_timer();
 
 	rte_eal_mp_wait_lcore();
+
+	rte_aqm_destroy(aqm_memory);
 
 	rte_eth_dev_stop(port_a);
 	rte_eth_dev_stop(port_b);
