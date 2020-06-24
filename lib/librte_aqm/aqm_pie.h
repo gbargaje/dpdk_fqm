@@ -23,8 +23,8 @@
 extern "C" {
 #endif
 
-#define PIE_DROP 		   0				/**< return value: Drop the packet */
-#define PIE_ENQUEUE		   1				/**< return value: Enqueue the packet */
+#define PIE_DROP 		   1				/**< return value: Drop the packet */
+#define PIE_ENQUEUE		   0				/**< return value: Enqueue the packet */
 #define PIE_FIX_POINT_BITS 13				/**< Number of bits for fractional part */
 #define PIE_PROB_BITS	   31				/**< Length of drop probability in bits */
 #define PIE_MAX_PROB	   ((1LL<<PIE_PROB_BITS)-1)	/**< Max drop probability value */
@@ -101,13 +101,14 @@ rte_pie_calc_drop_prob(__attribute__((unused)) struct rte_timer *tim,
 	int64_t p = config->alpha * (cur_qdelay - target_delay) + \
 		config->beta * (cur_qdelay - old_qdelay);
 
+	p >>= 3;
 	p_isneg = p < 0;
 
 	if (p_isneg)
 		p = -p;
 
 	p *= (PIE_MAX_PROB << 12) / rte_get_tsc_hz();
-	
+
 	//Drop probability auto-tuning logic as per RFC 8033
 	if (pie_rt->drop_prob < (PIE_MAX_PROB / 1000000)) {
 		p >>= 11 + PIE_FIX_POINT_BITS + 12;

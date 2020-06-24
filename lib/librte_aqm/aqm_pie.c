@@ -45,8 +45,8 @@ int aqm_pie_init(struct aqm_pie *pie, struct rte_aqm_pie_params *params)
 
 	config->target_delay    = pie_params->target_delay  * rte_get_timer_hz() / 1000u;
 	config->t_update        = pie_params->t_update * rte_get_timer_hz() / 1000u;
-	config->alpha           = pie_params->alpha << 5;
-	config->beta            = pie_params->beta << 5;
+	config->alpha           = 1;
+	config->beta            = 10;
 	config->mean_pkt_size   = pie_params->mean_pkt_size;
 	config->max_burst       = pie_params->max_burst * rte_get_timer_hz() / 1000u;
 

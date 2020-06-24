@@ -171,6 +171,7 @@ cfg_load_subport(struct rte_cfgfile *cfg, struct rte_sched_subport_params *subpo
 	struct rte_red_params red_params[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE][RTE_COLORS];
 	struct rte_codel_params codel_params[RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE][RTE_COLORS];
 
+	aqm_params.algorithm = RTE_AQM_FIFO;
 	snprintf(sec_name, sizeof(sec_name), "red");
 
 	if (rte_cfgfile_has_section(cfg, sec_name)) {
@@ -281,7 +282,7 @@ cfg_load_subport(struct rte_cfgfile *cfg, struct rte_sched_subport_params *subpo
 	snprintf(sec_name, sizeof(sec_name), "pie");
 
 	if (rte_cfgfile_has_section(cfg, sec_name)) {
-		aqm_params.algorithm = RTE_AQM_RED;
+		aqm_params.algorithm = RTE_AQM_PIE;
 		for (i = 0; i < RTE_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++) {
 			char str[32];
 
