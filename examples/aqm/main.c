@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <signal.h>
+#include <pthread.h>
 
 #include <rte_aqm.h>
 #include <rte_aqm_algorithm.h>
@@ -29,6 +30,8 @@ static volatile bool force_quit;
 
 #define RTE_TEST_RX_DESC_DEFAULT 1024
 #define RTE_TEST_TX_DESC_DEFAULT 1024
+static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
+static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 
 #define MAX_PKT_BURST 32
 #define MEMPOOL_CACHE_SIZE 256
@@ -36,17 +39,21 @@ static volatile bool force_quit;
 #define BURST_TX_DRAIN_US 100
 #define STATS_UPDATE_MS 100
 
-static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
-static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
-
 struct rte_mempool *aqm_pktmbuf_pool = NULL;
 
 static struct rte_eth_dev_tx_buffer *tx_buffer[RTE_MAX_ETHPORTS];
 static struct rte_mbuf **queue;
 static void *aqm_memory;
 
+pthread_mutex_t lock;
+
 static struct rte_eth_conf default_port_conf = {
-	.rxmode= { .max_rx_pkt_len = RTE_ETHER_MAX_LEN }
+	.rxmode = {
+		.split_hdr_size = 0,
+	},
+	.txmode = {
+		.mq_mode = ETH_MQ_TX_NONE,
+	}
 };
 
 struct aqm_port_statistics {
@@ -94,16 +101,11 @@ static void ab_rx(void)
 	printf("Forward path RX on lcore %u\n", rte_lcore_id());
 
 	uint8_t rx_port;
-	uint8_t tx_port;
-	uint16_t n_pkts_dropped;
 	uint32_t nb_rx;
-	uint32_t sent;
 	uint32_t i;
 	uint32_t enq_cnt;
-	uint32_t n_bytes_dropped;
 
 	rx_port = port_a;
-	tx_port = port_b;
 	enq_cnt = 0;
 
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
@@ -113,6 +115,7 @@ static void ab_rx(void)
 	{
 		nb_rx = rte_eth_rx_burst(rx_port, 0, pkts_burst, MAX_PKT_BURST);
 	
+		pthread_mutex_lock(&lock);
 		if (likely(nb_rx))
 		{
 			port_statistics[rx_port].rx += nb_rx;
@@ -121,20 +124,11 @@ static void ab_rx(void)
 			{
 				m = pkts_burst[i];
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *));
+
 				enq_cnt += rte_aqm_enqueue(aqm_memory, m);
 			}
-			for (i = 0; i < nb_rx; ++i)
-			{
-				m = pkts_burst[i];
-				if (rte_aqm_dequeue(aqm_memory, &m, &n_pkts_dropped,
-								&n_bytes_dropped) == 0)
-				{
-					sent = rte_eth_tx_buffer(tx_port, 0, tx_buffer[tx_port], m);
-					if (unlikely(sent))
-						port_statistics[tx_port].tx += sent;
-				}
-			}
 		}
+		pthread_mutex_unlock(&lock);
 	}
 
 	return;
@@ -143,11 +137,15 @@ static void ab_rx(void)
 static void ab_tx(void)
 {
 	uint8_t tx_port;
+	uint16_t n_pkts_dropped;
 	uint32_t sent;
+	uint32_t n_bytes_dropped;
 	uint64_t prev_tsc;
 	uint64_t diff_tsc;
 	uint64_t cur_tsc;
 	uint64_t drain_tsc;
+
+	struct rte_mbuf *pkt;
 
 	tx_port = port_b;
 
@@ -157,6 +155,15 @@ static void ab_tx(void)
 
 	while (!force_quit)
 	{
+		pthread_mutex_lock(&lock);
+		if (rte_aqm_dequeue(aqm_memory, &pkt, &n_pkts_dropped, &n_bytes_dropped) == 0)
+		{
+			sent = rte_eth_tx_buffer(tx_port, 0, tx_buffer[tx_port], pkt);
+			if (unlikely(sent))
+				port_statistics[tx_port].tx += sent;
+		}
+		pthread_mutex_unlock(&lock);
+
 		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 
@@ -311,12 +318,18 @@ static int port_init(uint8_t portid)
 
 	struct rte_eth_rxconf rxq_conf;
 	struct rte_eth_txconf txq_conf;
-	struct rte_eth_conf local_port_conf = default_port_conf;
+	struct rte_eth_conf local_port_conf;
 	struct rte_eth_dev_info dev_info;
+
+	local_port_conf = default_port_conf;
 
 	ret = rte_eth_dev_info_get(portid, &dev_info);
 	if (ret != 0)
 		return ret;
+
+	if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE)
+			local_port_conf.txmode.offloads |=
+				DEV_TX_OFFLOAD_MBUF_FAST_FREE;
 
 	ret = rte_eth_dev_configure(portid, 1, 1, &local_port_conf);
 	if (ret < 0)
@@ -360,8 +373,11 @@ static int port_init(uint8_t portid)
 	ret = rte_eth_tx_buffer_set_err_callback(tx_buffer[portid],
 				rte_eth_tx_buffer_count_callback,
 				&port_statistics[portid].dropped);
-
 	if (ret)
+		return ret;
+
+	ret = rte_eth_dev_set_ptypes(portid, RTE_PTYPE_UNKNOWN, NULL, 0);
+	if (ret < 0)
 		return ret;
 
 	ret = rte_eth_dev_start(portid);
@@ -371,6 +387,8 @@ static int port_init(uint8_t portid)
 	ret = rte_eth_promiscuous_enable(portid);
 	if (ret)
 		return ret;
+
+	memset(&port_statistics, 0, sizeof(port_statistics));
 
 	return 0;
 }
@@ -439,6 +457,9 @@ int main(int argc, char **argv)
 					default_params.qlen_pkts))
 		rte_exit(EXIT_FAILURE, "Failed to initialize AQM\n");
 
+	if (pthread_mutex_init(&lock, NULL) != 0)
+		rte_exit(EXIT_FAILURE, "Failed to initialize lock\n");
+
 	rte_eal_mp_remote_launch(assign_jobs, NULL, SKIP_MASTER);
 
 	manage_timer();
@@ -446,6 +467,8 @@ int main(int argc, char **argv)
 	rte_eal_mp_wait_lcore();
 
 	rte_aqm_destroy(aqm_memory);
+	rte_free(aqm_memory);
+	rte_free(queue);
 
 	rte_eth_dev_stop(port_a);
 	rte_eth_dev_stop(port_b);
