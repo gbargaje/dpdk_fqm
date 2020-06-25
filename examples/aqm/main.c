@@ -39,6 +39,9 @@ static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 #define BURST_TX_DRAIN_US 100
 #define STATS_UPDATE_MS 100
 
+#define TB_DROP 1
+#define TB_PASS 0
+
 struct rte_mempool *aqm_pktmbuf_pool = NULL;
 
 static struct rte_eth_dev_tx_buffer *tx_buffer[RTE_MAX_ETHPORTS];
@@ -69,6 +72,13 @@ struct port_params {
 	struct rte_aqm_params aqm_params;
 };
 
+static uint64_t tb_rate = 10;     // rate at which tokens are generated (in Mbps)
+static uint64_t tb_depth = 10000;   // depth of the token bucket (in bytes)
+static uint64_t tb_tokens = 10000;  // number of the tokens in the bucket at any given time (in bytes)
+
+static uint64_t tb_prev_cycles;
+static uint64_t tb_cur_cycles;
+
 static struct port_params default_params = {
 	.rate_bytes = 1250000,
 	.qlen_pkts = 1024,
@@ -88,6 +98,46 @@ signal_handler(int signum)
 					signum);
 		force_quit = true;
 	}
+}
+
+static int
+packet_handler_tb(struct rte_mbuf *pkt) {
+	uint64_t tokens_produced;
+	uint64_t cycles;
+
+	cycles = rte_get_tsc_hz();
+
+	if (unlikely(pkt->pkt_len > tb_depth))
+	{
+		return TB_DROP;
+	}
+	else
+	{
+		if (tb_tokens < pkt->pkt_len)
+		{
+			tb_cur_cycles = rte_rdtsc();
+			while ((((tb_cur_cycles - tb_prev_cycles) * tb_rate * 1000000) / cycles) + tb_tokens <
+				pkt->pkt_len)
+			{
+				tb_cur_cycles = rte_rdtsc();
+			}
+			tokens_produced = (((tb_cur_cycles - tb_prev_cycles) * tb_rate * 1000000) / cycles);
+			if (tokens_produced + tb_tokens > tb_depth)
+			{
+				tb_tokens = tb_depth;
+			}
+			else
+			{
+				tb_tokens += tokens_produced;
+			}
+
+			tb_prev_cycles = tb_cur_cycles;
+		}
+
+		tb_tokens -= pkt->pkt_len;
+	}
+
+	return TB_PASS;
 }
 
 static void port_stat(uint8_t portid) {
@@ -158,9 +208,11 @@ static void ab_tx(void)
 		pthread_mutex_lock(&lock);
 		if (rte_aqm_dequeue(aqm_memory, &pkt, &n_pkts_dropped, &n_bytes_dropped) == 0)
 		{
-			sent = rte_eth_tx_buffer(tx_port, 0, tx_buffer[tx_port], pkt);
-			if (unlikely(sent))
-				port_statistics[tx_port].tx += sent;
+			if (packet_handler_tb(pkt) == 0) {
+				sent = rte_eth_tx_buffer(tx_port, 0, tx_buffer[tx_port], pkt);
+				if (unlikely(sent))
+					port_statistics[tx_port].tx += sent;
+			}
 		}
 		pthread_mutex_unlock(&lock);
 
@@ -459,6 +511,8 @@ int main(int argc, char **argv)
 
 	if (pthread_mutex_init(&lock, NULL) != 0)
 		rte_exit(EXIT_FAILURE, "Failed to initialize lock\n");
+
+	tb_prev_cycles = rte_rdtsc();
 
 	rte_eal_mp_remote_launch(assign_jobs, NULL, SKIP_MASTER);
 
