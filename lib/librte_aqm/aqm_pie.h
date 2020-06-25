@@ -23,12 +23,12 @@
 extern "C" {
 #endif
 
-#define PIE_DROP 		   1				/**< return value: Drop the packet */
-#define PIE_ENQUEUE		   0				/**< return value: Enqueue the packet */
-#define PIE_FIX_POINT_BITS 13				/**< Number of bits for fractional part */
-#define PIE_PROB_BITS	   31				/**< Length of drop probability in bits */
-#define PIE_MAX_PROB	   ((1LL<<PIE_PROB_BITS)-1)	/**< Max drop probability value */
-
+#define PIE_DROP 		   	1				/**< return value: Drop the packet */
+#define PIE_ENQUEUE		   	0				/**< return value: Enqueue the packet */
+#define PIE_FIX_POINT_BITS 	13				/**< Number of bits for fractional part */
+#define PIE_PROB_BITS	   	31				/**< Length of drop probability in bits */
+#define PIE_MAX_PROB	   	((1LL<<PIE_PROB_BITS)-1)	/**< Max drop probability value */
+#define PIE_SCALE			(1LL<<PIE_FIX_POINT_BITS)
 /**
  * PIE configuration parameters
  */
@@ -101,7 +101,6 @@ rte_pie_calc_drop_prob(__attribute__((unused)) struct rte_timer *tim,
 	int64_t p = config->alpha * (cur_qdelay - target_delay) + \
 		config->beta * (cur_qdelay - old_qdelay);
 
-	p >>= 3;
 	p_isneg = p < 0;
 
 	if (p_isneg)
