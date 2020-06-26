@@ -20,11 +20,10 @@
 static uint8_t port_a = 0;
 static uint8_t port_b = 1;
 
-static uint8_t lcore_ab_rx = 1;
-static uint8_t lcore_ab_tx = 2;
-static uint8_t lcore_ba_rx = 3;
-static uint8_t lcore_ba_tx = 4;
-static uint8_t lcore_stats = 5;
+static uint8_t lcore_ab_rx 	= 1;
+static uint8_t lcore_ab_tx 	= 2;
+static uint8_t lcore_ba 	= 3;
+static uint8_t lcore_stats 	= 4;
 
 static volatile bool force_quit;
 
@@ -67,20 +66,23 @@ struct aqm_port_statistics {
 } __rte_cache_aligned;
 
 struct port_params {
-	uint32_t rate_bytes;
-	uint32_t qlen_pkts;
+	/* token bucket */
+	uint64_t tb_rate;
+	uint64_t tb_depth;
+	uint64_t tb_tokens;
+
+	/* queue management */
+	uint64_t qlen_pkts;
 	struct rte_aqm_params aqm_params;
 };
-
-static uint64_t tb_rate = 10;     // rate at which tokens are generated (in Mbps)
-static uint64_t tb_depth = 10000;   // depth of the token bucket (in bytes)
-static uint64_t tb_tokens = 10000;  // number of the tokens in the bucket at any given time (in bytes)
 
 static uint64_t tb_prev_cycles;
 static uint64_t tb_cur_cycles;
 
-static struct port_params default_params = {
-	.rate_bytes = 1250000,
+static struct port_params def_params = {
+	.tb_rate = 1250000,
+	.tb_depth = 1000,
+	.tb_tokens = 1000,
 	.qlen_pkts = 1024,
 	.aqm_params = {
 		.algorithm = RTE_AQM_FIFO,
@@ -107,40 +109,33 @@ packet_handler_tb(struct rte_mbuf *pkt) {
 
 	cycles = rte_get_tsc_hz();
 
-	if (unlikely(pkt->pkt_len > tb_depth))
-	{
+	if (unlikely(pkt->pkt_len > def_params.tb_depth)) {
 		return TB_DROP;
-	}
-	else
-	{
-		if (tb_tokens < pkt->pkt_len)
-		{
+	} else {
+		if (def_params.tb_tokens < pkt->pkt_len) {
 			tb_cur_cycles = rte_rdtsc();
-			while ((((tb_cur_cycles - tb_prev_cycles) * tb_rate * 1000000) / cycles) + tb_tokens <
-				pkt->pkt_len)
-			{
+			while ((((tb_cur_cycles - tb_prev_cycles) * def_params.tb_rate) / cycles) +
+				def_params.tb_tokens < pkt->pkt_len) {
 				tb_cur_cycles = rte_rdtsc();
 			}
-			tokens_produced = (((tb_cur_cycles - tb_prev_cycles) * tb_rate * 1000000) / cycles);
-			if (tokens_produced + tb_tokens > tb_depth)
-			{
-				tb_tokens = tb_depth;
-			}
-			else
-			{
-				tb_tokens += tokens_produced;
+			tokens_produced = (((tb_cur_cycles - tb_prev_cycles) * def_params.tb_rate) / cycles);
+			if (tokens_produced + def_params.tb_tokens > def_params.tb_depth) {
+				def_params.tb_tokens = def_params.tb_depth;
+			} else {
+				def_params.tb_tokens += tokens_produced;
 			}
 
 			tb_prev_cycles = tb_cur_cycles;
 		}
 
-		tb_tokens -= pkt->pkt_len;
+		def_params.tb_tokens -= pkt->pkt_len;
 	}
 
 	return TB_PASS;
 }
 
-static void port_stat(uint8_t portid) {
+static void port_stat(uint8_t portid)
+{
 	/* TODO: Stats Printing */
 
 	return;
@@ -161,17 +156,14 @@ static void ab_rx(void)
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	struct rte_mbuf *m;
 
-	while (!force_quit)
-	{
+	while (!force_quit) {
 		nb_rx = rte_eth_rx_burst(rx_port, 0, pkts_burst, MAX_PKT_BURST);
 	
 		pthread_mutex_lock(&lock);
-		if (likely(nb_rx))
-		{
+		if (likely(nb_rx)) {
 			port_statistics[rx_port].rx += nb_rx;
 
-			for (i = 0; i < nb_rx; ++i)
-			{
+			for (i = 0; i < nb_rx; ++i) {
 				m = pkts_burst[i];
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *));
 
@@ -186,6 +178,8 @@ static void ab_rx(void)
 
 static void ab_tx(void)
 {
+	printf("Forward path TX on lcore %u\n", rte_lcore_id());
+
 	uint8_t tx_port;
 	uint16_t n_pkts_dropped;
 	uint32_t sent;
@@ -203,11 +197,9 @@ static void ab_tx(void)
 	drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
 					BURST_TX_DRAIN_US;
 
-	while (!force_quit)
-	{
+	while (!force_quit) {
 		pthread_mutex_lock(&lock);
-		if (rte_aqm_dequeue(aqm_memory, &pkt, &n_pkts_dropped, &n_bytes_dropped) == 0)
-		{
+		if (rte_aqm_dequeue(aqm_memory, &pkt, &n_pkts_dropped, &n_bytes_dropped) == 0) {
 			if (packet_handler_tb(pkt) == 0) {
 				sent = rte_eth_tx_buffer(tx_port, 0, tx_buffer[tx_port], pkt);
 				if (unlikely(sent))
@@ -219,8 +211,7 @@ static void ab_tx(void)
 		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 
-		if (unlikely(diff_tsc > drain_tsc))
-		{
+		if (unlikely(diff_tsc > drain_tsc)) {
 			sent = rte_eth_tx_buffer_flush(tx_port, 0, tx_buffer[tx_port]);
 			if (likely(sent))
 				port_statistics[tx_port].tx += sent;
@@ -230,18 +221,26 @@ static void ab_tx(void)
 	return;
 }
 
-static void ba_rx(void)
+static void ba_rx_tx(void)
 {
-	printf("Reverse path RX on lcore %u\n", rte_lcore_id());
+	printf("Reverse path RX and TX on lcore %u\n", rte_lcore_id());
 
 	uint8_t rx_port;
 	uint8_t tx_port;
 	uint32_t nb_rx;
 	uint32_t sent;
 	uint32_t i;
+	uint64_t prev_tsc;
+	uint64_t diff_tsc;
+	uint64_t cur_tsc;
+	uint64_t drain_tsc;
 
 	rx_port = port_b;
 	tx_port = port_a;
+
+	prev_tsc = 0;
+	drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
+					BURST_TX_DRAIN_US;
 
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	struct rte_mbuf *m;
@@ -250,12 +249,10 @@ static void ba_rx(void)
 	{
 		nb_rx = rte_eth_rx_burst(rx_port, 0, pkts_burst, MAX_PKT_BURST);
 		
-		if (likely(nb_rx))
-		{
+		if (likely(nb_rx)) {
 			port_statistics[rx_port].rx += nb_rx;
 
-			for (i = 0; i < nb_rx; ++i)
-			{
+			for (i = 0; i < nb_rx; ++i) {
 				m = pkts_burst[i];
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *));
 				sent = rte_eth_tx_buffer(tx_port, 0, tx_buffer[tx_port], m);
@@ -264,37 +261,12 @@ static void ba_rx(void)
 					port_statistics[tx_port].tx += sent;
 			}
 		}
-	}
 
-	return;
-}
-
-static void ba_tx(void)
-{
-	printf("Reverse path TX on lcore %u\n", rte_lcore_id());
-	
-	uint8_t tx_port;
-	uint32_t sent;
-	uint64_t prev_tsc;
-	uint64_t diff_tsc;
-	uint64_t cur_tsc;
-	uint64_t drain_tsc;
-
-	tx_port = port_a;
-
-	prev_tsc = 0;
-	drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
-					BURST_TX_DRAIN_US;
-
-	while (!force_quit)
-	{
 		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 
-		if (unlikely(diff_tsc > drain_tsc))
-		{
+		if (unlikely(diff_tsc > drain_tsc)) {
 			sent = rte_eth_tx_buffer_flush(tx_port, 0, tx_buffer[tx_port]);
-
 			if (likely(sent))
 				port_statistics[tx_port].tx += sent;
 		}
@@ -321,8 +293,7 @@ static void stats(void)
 		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 
-		if (unlikely(diff_tsc > stats_tsc))
-		{
+		if (unlikely(diff_tsc > stats_tsc)) {
 			port_stat(port_b);
 		}
 	}
@@ -342,10 +313,8 @@ static int assign_jobs(__rte_unused void *arg)
 		ab_rx();
 	else if (lcore_id == lcore_ab_tx)
 		ab_tx();
-	else if (lcore_id == lcore_ba_rx)
-		ba_rx();
-	else if (lcore_id == lcore_ba_tx)
-		ba_tx();
+	else if (lcore_id == lcore_ba)
+		ba_rx_tx();
 
 	return 0;
 }
@@ -489,9 +458,9 @@ int main(int argc, char **argv)
 	if (ret < 0)
 		rte_exit(EXIT_FAILURE, "Failed to initialize port %u\n", port_b);
 
-	aqm_memory_size = rte_aqm_get_memory_size(default_params.aqm_params.algorithm);
+	aqm_memory_size = rte_aqm_get_memory_size(def_params.aqm_params.algorithm);
 
-	queue_memory_size = default_params.qlen_pkts * sizeof(struct rte_mbuf *);
+	queue_memory_size = def_params.qlen_pkts * sizeof(struct rte_mbuf *);
 
 	queue = (struct rte_mbuf **) rte_zmalloc_socket("qbase", queue_memory_size,
 					RTE_CACHE_LINE_SIZE, rte_eth_dev_socket_id(port_b));
@@ -505,8 +474,8 @@ int main(int argc, char **argv)
 	if (queue == NULL)
 		rte_exit(EXIT_FAILURE, "Failed to allocate aqm memory\n");
 
-	if (rte_aqm_init(aqm_memory, &default_params.aqm_params, queue,
-					default_params.qlen_pkts))
+	if (rte_aqm_init(aqm_memory, &def_params.aqm_params, queue,
+					def_params.qlen_pkts))
 		rte_exit(EXIT_FAILURE, "Failed to initialize AQM\n");
 
 	if (pthread_mutex_init(&lock, NULL) != 0)
