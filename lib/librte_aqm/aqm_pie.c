@@ -65,7 +65,7 @@ aqm_pie_drop(struct rte_pie_config *config,
 	struct rte_pie_rt *pie_rt,
 	uint32_t qlen) 
 {
-	if((pie_rt->cur_qdelay < config->target_delay>>1 \
+	if((pie_rt->old_qdelay < config->target_delay>>1 \
 		&& pie_rt->drop_prob < PIE_MAX_PROB/5) \
 		|| (qlen <= 2*config->mean_pkt_size)){
 		return PIE_ENQUEUE;
