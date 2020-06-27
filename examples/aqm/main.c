@@ -80,9 +80,9 @@ static uint64_t tb_prev_cycles;
 static uint64_t tb_cur_cycles;
 
 static struct port_params def_params = {
-	.tb_rate = 1250000,
-	.tb_depth = 1000,
-	.tb_tokens = 1000,
+	.tb_rate = 12500000,
+	.tb_depth = 10000,
+	.tb_tokens = 10000,
 	.qlen_pkts = 1024,
 	.aqm_params = {
 		.algorithm = RTE_AQM_FIFO,
@@ -136,7 +136,20 @@ packet_handler_tb(struct rte_mbuf *pkt) {
 
 static void port_stat(uint8_t portid)
 {
-	/* TODO: Stats Printing */
+	FILE *fp;
+	fp = fopen("statistics.txt", "a");
+
+	struct rte_aqm_stats *aqm_stats = &port_statistics[portid].aqm_stats;
+
+	rte_aqm_get_stats(aqm_memory, aqm_stats);
+	printf("%lu %lu %lu %lu\n",
+		aqm_stats->bytes_dequeued, aqm_stats->queue_delay,
+		aqm_stats->pkts_dropped_enqueue, aqm_stats->pkts_dropped_dequeue);
+	fprintf(fp, "%lu %lu %lu %lu\n",
+		aqm_stats->bytes_dequeued, aqm_stats->queue_delay,
+		aqm_stats->pkts_dropped_enqueue, aqm_stats->pkts_dropped_dequeue);
+
+	fclose(fp);
 
 	return;
 }
@@ -158,7 +171,7 @@ static void ab_rx(void)
 
 	while (!force_quit) {
 		nb_rx = rte_eth_rx_burst(rx_port, 0, pkts_burst, MAX_PKT_BURST);
-	
+
 		pthread_mutex_lock(&lock);
 		if (likely(nb_rx)) {
 			port_statistics[rx_port].rx += nb_rx;
@@ -195,7 +208,7 @@ static void ab_tx(void)
 
 	prev_tsc = 0;
 	drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
-					BURST_TX_DRAIN_US;
+				BURST_TX_DRAIN_US;
 
 	while (!force_quit) {
 		pthread_mutex_lock(&lock);
@@ -240,7 +253,7 @@ static void ba_rx_tx(void)
 
 	prev_tsc = 0;
 	drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
-					BURST_TX_DRAIN_US;
+				BURST_TX_DRAIN_US;
 
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	struct rte_mbuf *m;
@@ -295,6 +308,7 @@ static void stats(void)
 
 		if (unlikely(diff_tsc > stats_tsc)) {
 			port_stat(port_b);
+			prev_tsc = cur_tsc;
 		}
 	}
 
@@ -349,7 +363,7 @@ static int port_init(uint8_t portid)
 		return ret;
 
 	if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE)
-			local_port_conf.txmode.offloads |=
+		local_port_conf.txmode.offloads |=
 				DEV_TX_OFFLOAD_MBUF_FAST_FREE;
 
 	ret = rte_eth_dev_configure(portid, 1, 1, &local_port_conf);
@@ -357,16 +371,16 @@ static int port_init(uint8_t portid)
 		return ret;
 
 	ret = rte_eth_dev_adjust_nb_rx_tx_desc(portid, &nb_rxd,
-						   &nb_txd);
+				&nb_txd);
 	if (ret < 0)
 		return ret;
 
 	rxq_conf = dev_info.default_rxconf;
 	rxq_conf.offloads = local_port_conf.rxmode.offloads;
 	ret = rte_eth_rx_queue_setup(portid, 0, nb_rxd,
-					 rte_eth_dev_socket_id(portid),
-					 &rxq_conf,
-					 aqm_pktmbuf_pool);
+				rte_eth_dev_socket_id(portid),
+				&rxq_conf,
+				aqm_pktmbuf_pool);
 	if (ret < 0)
 		return ret;
 
@@ -374,15 +388,15 @@ static int port_init(uint8_t portid)
 	txq_conf.offloads = local_port_conf.txmode.offloads;
 	
 	ret = rte_eth_tx_queue_setup(portid, 0, nb_txd,
-			rte_eth_dev_socket_id(portid),
-			&txq_conf);
+				rte_eth_dev_socket_id(portid),
+				&txq_conf);
 	
 	if (ret < 0)
 		return ret;
 
 	tx_buffer[portid] = rte_zmalloc_socket("tx_buffer",
-			RTE_ETH_TX_BUFFER_SIZE(MAX_PKT_BURST), 0,
-			rte_eth_dev_socket_id(portid));
+				RTE_ETH_TX_BUFFER_SIZE(MAX_PKT_BURST), 0,
+				rte_eth_dev_socket_id(portid));
 
 	if (tx_buffer[portid] == NULL)
 		return -1;
@@ -424,7 +438,7 @@ int main(int argc, char **argv)
 	uint32_t nb_mbufs;
 
 	nb_ports = 2;
-	nb_lcores = 6;
+	nb_lcores = 5;
 
 	force_quit = false;
 	signal(SIGINT, signal_handler);
@@ -441,11 +455,11 @@ int main(int argc, char **argv)
 		rte_exit(EXIT_FAILURE, "Invalid application arguments\n");
 
 	nb_mbufs = RTE_MAX(nb_ports * (nb_rxd + nb_txd + MAX_PKT_BURST +
-		nb_lcores * MEMPOOL_CACHE_SIZE), 8192U);
+				nb_lcores * MEMPOOL_CACHE_SIZE), 8192U);
 
 	aqm_pktmbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", nb_mbufs,
-		MEMPOOL_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE,
-		rte_socket_id());
+				MEMPOOL_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE,
+				rte_socket_id());
 
 	if (aqm_pktmbuf_pool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot init mbuf pool\n");
@@ -463,19 +477,19 @@ int main(int argc, char **argv)
 	queue_memory_size = def_params.qlen_pkts * sizeof(struct rte_mbuf *);
 
 	queue = (struct rte_mbuf **) rte_zmalloc_socket("qbase", queue_memory_size,
-					RTE_CACHE_LINE_SIZE, rte_eth_dev_socket_id(port_b));
+				RTE_CACHE_LINE_SIZE, rte_eth_dev_socket_id(port_b));
 
 	if (queue == NULL)
 		rte_exit(EXIT_FAILURE, "Failed to allocate queue memory\n");
 
 	aqm_memory = rte_zmalloc_socket("aqm_memory", aqm_memory_size,
-					RTE_CACHE_LINE_SIZE, rte_eth_dev_socket_id(port_b));
+				RTE_CACHE_LINE_SIZE, rte_eth_dev_socket_id(port_b));
 
 	if (queue == NULL)
 		rte_exit(EXIT_FAILURE, "Failed to allocate aqm memory\n");
 
 	if (rte_aqm_init(aqm_memory, &def_params.aqm_params, queue,
-					def_params.qlen_pkts))
+				def_params.qlen_pkts) != 0)
 		rte_exit(EXIT_FAILURE, "Failed to initialize AQM\n");
 
 	if (pthread_mutex_init(&lock, NULL) != 0)
