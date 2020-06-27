@@ -6,7 +6,9 @@
 #include <stdio.h>
 #include <signal.h>
 #include <pthread.h>
+#include <getopt.h>
 
+#include <rte_log.h>
 #include <rte_aqm.h>
 #include <rte_aqm_algorithm.h>
 #include <rte_eal.h>
@@ -16,6 +18,8 @@
 #include <rte_malloc.h>
 #include <rte_mempool.h>
 #include <rte_mbuf.h>
+#include <rte_string_fns.h>
+#include <rte_timer.h>
 
 static uint8_t port_a = 0;
 static uint8_t port_b = 1;
@@ -37,9 +41,14 @@ static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 
 #define BURST_TX_DRAIN_US 100
 #define STATS_UPDATE_MS 100
+#define TIMER_MANAGE_MS 10
 
 #define TB_DROP 1
 #define TB_PASS 0
+
+#define MAX_OPT_VALUES 8
+
+#define RTE_LOGTYPE_APP RTE_LOGTYPE_USER1
 
 struct rte_mempool *aqm_pktmbuf_pool = NULL;
 
@@ -102,6 +111,21 @@ signal_handler(int signum)
 	}
 }
 
+static const char usage[] =
+	" <APP PARAMS>																	\n"
+	"Mandatory parameters:																\n"
+	"	--aqm 																			\n"
+	"	--qlen 																			\n"
+	"	--aqm_params 																	\n"
+	"	--tb 																			\n"
+;
+
+static void
+app_usage(void)
+{
+	printf(usage);
+}
+
 static int
 packet_handler_tb(struct rte_mbuf *pkt) {
 	uint64_t tokens_produced;
@@ -156,7 +180,7 @@ static void port_stat(uint8_t portid)
 
 static void ab_rx(void)
 {
-	printf("Forward path RX on lcore %u\n", rte_lcore_id());
+	// printf("Forward path RX on lcore %u\n", rte_lcore_id());
 
 	uint8_t rx_port;
 	uint32_t nb_rx;
@@ -191,7 +215,7 @@ static void ab_rx(void)
 
 static void ab_tx(void)
 {
-	printf("Forward path TX on lcore %u\n", rte_lcore_id());
+	// printf("Forward path TX on lcore %u\n", rte_lcore_id());
 
 	uint8_t tx_port;
 	uint16_t n_pkts_dropped;
@@ -236,7 +260,7 @@ static void ab_tx(void)
 
 static void ba_rx_tx(void)
 {
-	printf("Reverse path RX and TX on lcore %u\n", rte_lcore_id());
+	// printf("Reverse path RX and TX on lcore %u\n", rte_lcore_id());
 
 	uint8_t rx_port;
 	uint8_t tx_port;
@@ -290,7 +314,7 @@ static void ba_rx_tx(void)
 
 static void stats(void)
 {
-	printf("Statistics on lcore %u\n", rte_lcore_id());
+	// printf("Statistics on lcore %u\n", rte_lcore_id());
 
 	uint64_t prev_tsc;
 	uint64_t diff_tsc;
@@ -335,15 +359,207 @@ static int assign_jobs(__rte_unused void *arg)
 
 static int manage_timer(void)
 {
-	printf("Timer Management on lcore %u\n", rte_lcore_id());
+	uint64_t prev_tsc;
+	uint64_t diff_tsc;
+	uint64_t cur_tsc;
+	uint64_t timer_tsc;
+
+	prev_tsc = 0;
+	timer_tsc = (rte_get_tsc_hz() + MS_PER_S - 1) / MS_PER_S *
+					TIMER_MANAGE_MS;
+
+	while (!force_quit)
+	{
+		cur_tsc = rte_rdtsc();
+		diff_tsc = cur_tsc - prev_tsc;
+
+		if (unlikely(diff_tsc > timer_tsc)) {
+			rte_timer_manage();
+			prev_tsc = cur_tsc;
+		}
+	}
+
+	return 0;
+}
+
+static int
+app_parse_opt_vals(const char *conf_str, char separator, uint32_t n_vals, uint64_t *opt_vals)
+{
+	char *string;
+	int i, n_tokens;
+	char *tokens[MAX_OPT_VALUES];
+
+	if (conf_str == NULL || opt_vals == NULL || n_vals == 0 || n_vals > MAX_OPT_VALUES)
+		return -1;
+
+	string = strdup(conf_str);
+	if (string == NULL)
+		return -1;
+
+	n_tokens = rte_strsplit(string, strnlen(string, 32), tokens, n_vals, separator);
+
+	if (n_tokens > MAX_OPT_VALUES)
+		return -1;
+
+	for (i = 0; i < n_tokens; i++)
+		opt_vals[i] = (uint64_t) atol(tokens[i]);
+
+	free(string);
+
+	return n_tokens;
+}
+
+static int
+app_parse_tb_config(const char *conf_str)
+{
+	int ret;
+	uint64_t vals[3];
+
+	ret = app_parse_opt_vals(conf_str, ',', 3, vals);
+	if (ret != 3)
+		return ret;
+
+	def_params.tb_rate = vals[0];
+	def_params.tb_depth = vals[1];
+	def_params.tb_tokens = vals[2];
+
+	return 0;
+}
+
+static int
+app_parse_aqm_config(const char *conf_str, int aqm_algorithm, int num_params)
+{
+	int ret;
+	uint64_t vals[num_params];
+
+	if (aqm_algorithm != 4) {
+		ret = app_parse_opt_vals(conf_str, ',', num_params, vals);
+		if (ret != num_params)
+			return ret;
+	}
+
+	switch (aqm_algorithm)
+	{
+		case 1:
+		{
+			static struct rte_red_params red_params;
+			red_params.min_th = (uint16_t) vals[0];
+			red_params.max_th = (uint16_t) vals[1];
+			red_params.maxp_inv = (uint16_t) vals[2];
+			red_params.wq_log2 = (uint16_t) vals[3];
+
+			def_params.aqm_params.algorithm = RTE_AQM_RED;
+			def_params.aqm_params.algorithm_params = &red_params;
+			break;
+		}
+		case 2:
+		{
+			static struct rte_codel_params codel_params;
+			codel_params.target = (uint32_t) vals[0];
+			codel_params.interval = (uint32_t) vals[1];
+
+			def_params.aqm_params.algorithm = RTE_AQM_CODEL;
+			def_params.aqm_params.algorithm_params = &codel_params;
+			break;
+		}
+		case 3:
+		{
+			static struct rte_pie_params pie_params;
+			pie_params.target_delay = (uint32_t) vals[0];
+			pie_params.t_update = (uint32_t) vals[1];
+			pie_params.mean_pkt_size = (uint32_t) vals[2];
+			pie_params.max_burst = (uint32_t) vals[3];
+
+			def_params.aqm_params.algorithm = RTE_AQM_PIE;
+			def_params.aqm_params.algorithm_params = &pie_params;
+			break;
+		}
+		case 4:
+		{
+			def_params.aqm_params.algorithm = RTE_AQM_FIFO;
+			def_params.aqm_params.algorithm_params = NULL;
+		}
+	}
 
 	return 0;
 }
 
 static int parse_args(int argc, char **argv)
 {
-	/* TODO: Options Parsing */
+	static struct option lgopts[] =
+	{
+		{ "qlen", 1, 0, 0 },
+		{ "tb", 1, 0, 0 },
+		{ "aqm", 1, 0, 0 },
+		{ "aqm_params", 1, 0, 0 },
+		{ NULL, 0, 0, 0 }
+	};
 
+	int option_index = 0;
+	int opt = 0;
+	int aqm_algorithm = -1;
+	int num_aqm_params = -1;
+	int ret;
+
+	const char *optname;
+
+	while ((opt = getopt_long(argc, argv, "", lgopts, &option_index)) != EOF) {
+		switch (opt) {
+			case 0:
+				optname = lgopts[option_index].name;
+				if (strcmp(optname, "qlen") == 0) {
+					def_params.qlen_pkts = (uint64_t) atol(optarg);
+					if (def_params.qlen_pkts <= 0) {
+						RTE_LOG(ERR, APP, "Invalid queue length %s\n", optarg);
+						return -1;
+					}
+					break;
+				}
+				if (strcmp(optname, "tb") == 0) {
+					ret = app_parse_tb_config(optarg);
+					if (ret) {
+						RTE_LOG(ERR, APP, "Invalid token bucket config\n");
+						return -1;
+					}
+					break;
+				}
+				if (strcmp(optname, "aqm") == 0) {
+					if (strcmp(optarg, "codel") == 0) {
+						aqm_algorithm = 2;
+						num_aqm_params = 2;
+					} else if (strcmp(optarg, "pie") == 0) {
+						aqm_algorithm = 3;
+						num_aqm_params = 4;
+					} else if (strcmp(optarg, "red") == 0) {
+						aqm_algorithm = 1;
+						num_aqm_params = 4;
+					} else if (strcmp(optarg, "fifo") == 0) {
+						aqm_algorithm = 4;
+						num_aqm_params = 0;
+					} else {
+						RTE_LOG(ERR, APP, "Unknown AQM type %s\n", optarg);
+						return -1;
+					}
+					break;
+				}
+				if (strcmp(optname, "aqm_params") == 0) {
+					if (aqm_algorithm == -1) {
+						RTE_LOG(ERR, APP, "--aqm_params must follow --aqm\n");
+						return -1;
+					}
+					ret = app_parse_aqm_config(optarg, aqm_algorithm, num_aqm_params);
+					if (ret) {
+						RTE_LOG(ERR, APP, "Invalid AQM config\n");
+						return -1;
+					}
+					break;
+				}
+				break;
+			default:
+				app_usage();
+				return -1;
+		}
+	}
 	return 0;
 }
 
@@ -428,6 +644,55 @@ static int port_init(uint8_t portid)
 	return 0;
 }
 
+
+static void
+print_def_params(void) {
+
+	printf("qlength = %ld\n", def_params.qlen_pkts);
+	printf("tb_rate = %ld\ntb_depth = %ld\ntb_tokens = %ld\n",
+		def_params.tb_rate,
+		def_params.tb_depth,
+		def_params.tb_tokens);
+	printf("aqm = ");
+
+	switch(def_params.aqm_params.algorithm) {
+		case RTE_AQM_WRED:
+			printf("wred\n");
+			break;
+		case RTE_AQM_FIFO:
+			printf("fifo\n");
+			break;
+		case RTE_AQM_PIE: ;
+			struct rte_pie_params *pie_params = 
+					(struct rte_pie_params * ) def_params.aqm_params.algorithm_params;
+			printf("pie\n");
+			printf("target_delay = %d\nt_update = %d\nmean_pkt_size = %d\nmax_burst = %d\n",
+				pie_params->target_delay,
+				pie_params->t_update,
+				pie_params->mean_pkt_size,
+				pie_params->max_burst);
+			break;
+		case RTE_AQM_CODEL: ;
+			struct rte_codel_params *codel_params = 
+					(struct rte_codel_params *) def_params.aqm_params.algorithm_params;
+			printf("codel\n");
+			printf("target = %ld\ninterval = %ld\n",
+				codel_params->target,
+				codel_params->interval);
+			break;
+		case RTE_AQM_RED: ;
+			struct rte_red_params *red_params = 
+					(struct rte_red_params *) def_params.aqm_params.algorithm_params;
+			printf("red\n");
+			printf("min_th = %d\nmax_th = %d\nmaxp_inv = %d\nwq_log2 = %d\n",
+				red_params->min_th,
+				red_params->max_th,
+				red_params->maxp_inv,
+				red_params->wq_log2);
+			break;
+	}
+}
+
 int main(int argc, char **argv)
 {
 	int ret;
@@ -496,6 +761,8 @@ int main(int argc, char **argv)
 		rte_exit(EXIT_FAILURE, "Failed to initialize lock\n");
 
 	tb_prev_cycles = rte_rdtsc();
+
+	print_def_params();
 
 	rte_eal_mp_remote_launch(assign_jobs, NULL, SKIP_MASTER);
 
