@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <signal.h>
-#include <pthread.h>
 #include <getopt.h>
 
 #include <rte_log.h>
@@ -55,8 +54,6 @@ struct rte_mempool *aqm_pktmbuf_pool = NULL;
 static struct rte_eth_dev_tx_buffer *tx_buffer[RTE_MAX_ETHPORTS];
 static struct rte_ring *queue;
 static void *aqm_memory;
-
-pthread_mutex_t lock;
 
 static struct rte_eth_conf default_port_conf = {
 	.rxmode = {
@@ -180,7 +177,7 @@ static void port_stat(uint8_t portid)
 
 static void ab_rx(void)
 {
-	// printf("Forward path RX on lcore %u\n", rte_lcore_id());
+	printf("Forward path RX on lcore %u\n", rte_lcore_id());
 
 	uint8_t rx_port;
 	uint32_t nb_rx;
@@ -196,7 +193,6 @@ static void ab_rx(void)
 	while (!force_quit) {
 		nb_rx = rte_eth_rx_burst(rx_port, 0, pkts_burst, MAX_PKT_BURST);
 
-		pthread_mutex_lock(&lock);
 		if (likely(nb_rx)) {
 			port_statistics[rx_port].rx += nb_rx;
 
@@ -207,7 +203,6 @@ static void ab_rx(void)
 				enq_cnt += rte_aqm_enqueue(aqm_memory, m);
 			}
 		}
-		pthread_mutex_unlock(&lock);
 	}
 
 	return;
@@ -215,7 +210,7 @@ static void ab_rx(void)
 
 static void ab_tx(void)
 {
-	// printf("Forward path TX on lcore %u\n", rte_lcore_id());
+	printf("Forward path TX on lcore %u\n", rte_lcore_id());
 
 	uint8_t tx_port;
 	uint16_t n_pkts_dropped;
@@ -235,7 +230,6 @@ static void ab_tx(void)
 				BURST_TX_DRAIN_US;
 
 	while (!force_quit) {
-		pthread_mutex_lock(&lock);
 		if (rte_aqm_dequeue(aqm_memory, &pkt, &n_pkts_dropped, &n_bytes_dropped) == 0) {
 			if (packet_handler_tb(pkt) == 0) {
 				sent = rte_eth_tx_buffer(tx_port, 0, tx_buffer[tx_port], pkt);
@@ -243,7 +237,6 @@ static void ab_tx(void)
 					port_statistics[tx_port].tx += sent;
 			}
 		}
-		pthread_mutex_unlock(&lock);
 
 		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
@@ -260,7 +253,7 @@ static void ab_tx(void)
 
 static void ba_rx_tx(void)
 {
-	// printf("Reverse path RX and TX on lcore %u\n", rte_lcore_id());
+	printf("Reverse path RX and TX on lcore %u\n", rte_lcore_id());
 
 	uint8_t rx_port;
 	uint8_t tx_port;
@@ -314,29 +307,86 @@ static void ba_rx_tx(void)
 
 static void stats(void)
 {
-	// printf("Statistics on lcore %u\n", rte_lcore_id());
+	printf("Statistics and timer management on lcore %u\n", rte_lcore_id());
 
-	uint64_t prev_tsc;
-	uint64_t diff_tsc;
-	uint64_t cur_tsc;
+	uint64_t stats_prev_tsc;
+	uint64_t stats_diff_tsc;
+	uint64_t stats_cur_tsc;
 	uint64_t stats_tsc;
+	uint64_t timer_prev_tsc;
+	uint64_t timer_diff_tsc;
+	uint64_t timer_cur_tsc;
+	uint64_t timer_tsc;
 
-	prev_tsc = 0;
+	stats_prev_tsc = 0;
+	timer_prev_tsc = 0;
 	stats_tsc = (rte_get_tsc_hz() + MS_PER_S - 1) / MS_PER_S *
 					STATS_UPDATE_MS;
+	timer_tsc = (rte_get_tsc_hz() + MS_PER_S - 1) / MS_PER_S *
+					TIMER_MANAGE_MS;
 
 	while (!force_quit)
 	{
-		cur_tsc = rte_rdtsc();
-		diff_tsc = cur_tsc - prev_tsc;
+		stats_cur_tsc = rte_rdtsc();
+		stats_diff_tsc = stats_cur_tsc - stats_prev_tsc;
 
-		if (unlikely(diff_tsc > stats_tsc)) {
+		if (unlikely(stats_diff_tsc > stats_tsc)) {
 			port_stat(port_b);
-			prev_tsc = cur_tsc;
+			stats_prev_tsc = stats_cur_tsc;
+		}
+
+		timer_cur_tsc = rte_rdtsc();
+		timer_diff_tsc = timer_cur_tsc - timer_prev_tsc;
+
+		if (unlikely(timer_diff_tsc > timer_tsc)) {
+			rte_timer_manage();
+			timer_prev_tsc = timer_cur_tsc;
 		}
 	}
 
 	return;
+}
+
+static int manage_timer(void)
+{
+	printf("Statistics and timer management on lcore %u\n", rte_lcore_id());
+
+	uint64_t stats_prev_tsc;
+	uint64_t stats_diff_tsc;
+	uint64_t stats_cur_tsc;
+	uint64_t stats_tsc;
+	uint64_t timer_prev_tsc;
+	uint64_t timer_diff_tsc;
+	uint64_t timer_cur_tsc;
+	uint64_t timer_tsc;
+
+	stats_prev_tsc = 0;
+	timer_prev_tsc = 0;
+	stats_tsc = (rte_get_tsc_hz() + MS_PER_S - 1) / MS_PER_S *
+					STATS_UPDATE_MS;
+	timer_tsc = (rte_get_tsc_hz() + MS_PER_S - 1) / MS_PER_S *
+					TIMER_MANAGE_MS;
+
+	while (!force_quit)
+	{
+		stats_cur_tsc = rte_rdtsc();
+		stats_diff_tsc = stats_cur_tsc - stats_prev_tsc;
+
+		if (unlikely(stats_diff_tsc > stats_tsc)) {
+			port_stat(port_b);
+			stats_prev_tsc = stats_cur_tsc;
+		}
+
+		timer_cur_tsc = rte_rdtsc();
+		timer_diff_tsc = timer_cur_tsc - timer_prev_tsc;
+
+		if (unlikely(timer_diff_tsc > timer_tsc)) {
+			rte_timer_manage();
+			timer_prev_tsc = timer_cur_tsc;
+		}
+	}
+
+	return 0;
 }
 
 static int assign_jobs(__rte_unused void *arg)
@@ -353,31 +403,6 @@ static int assign_jobs(__rte_unused void *arg)
 		ab_tx();
 	else if (lcore_id == lcore_ba)
 		ba_rx_tx();
-
-	return 0;
-}
-
-static int manage_timer(void)
-{
-	uint64_t prev_tsc;
-	uint64_t diff_tsc;
-	uint64_t cur_tsc;
-	uint64_t timer_tsc;
-
-	prev_tsc = 0;
-	timer_tsc = (rte_get_tsc_hz() + MS_PER_S - 1) / MS_PER_S *
-					TIMER_MANAGE_MS;
-
-	while (!force_quit)
-	{
-		cur_tsc = rte_rdtsc();
-		diff_tsc = cur_tsc - prev_tsc;
-
-		if (unlikely(diff_tsc > timer_tsc)) {
-			rte_timer_manage();
-			prev_tsc = cur_tsc;
-		}
-	}
 
 	return 0;
 }
@@ -752,9 +777,6 @@ int main(int argc, char **argv)
 	if (rte_aqm_init(aqm_memory, &def_params.aqm_params, queue,
 				def_params.qlen_pkts) != 0)
 		rte_exit(EXIT_FAILURE, "Failed to initialize AQM\n");
-
-	if (pthread_mutex_init(&lock, NULL) != 0)
-		rte_exit(EXIT_FAILURE, "Failed to initialize lock\n");
 
 	tb_prev_cycles = rte_rdtsc();
 
