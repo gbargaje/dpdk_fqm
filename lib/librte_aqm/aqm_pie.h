@@ -29,6 +29,7 @@ extern "C" {
 #define PIE_PROB_BITS	   	31				/**< Length of drop probability in bits */
 #define PIE_MAX_PROB	   	((1LL<<PIE_PROB_BITS)-1)	/**< Max drop probability value */
 #define PIE_SCALE			(1LL<<PIE_FIX_POINT_BITS)
+
 /**
  * PIE configuration parameters
  */
@@ -52,8 +53,6 @@ struct rte_pie_rt {
 	uint64_t accu_prob;	  /**< Accumulated drop probability. Reset to 0 */
 	struct rte_timer *pie_timer;
 };
-
-
 
 struct aqm_pie {
 	struct rte_pie_rt pie_rt;
@@ -86,7 +85,7 @@ int aqm_pie_destroy(struct aqm_pie *pie);
  */
 __rte_unused static void 
 rte_pie_calc_drop_prob(__attribute__((unused)) struct rte_timer *tim, 
-	void *arg) 
+	void *arg)
 {
 	struct aqm_pie *pie = (struct aqm_pie *) arg;
 	struct rte_pie_config *config = &pie->pie_config;
@@ -106,9 +105,11 @@ rte_pie_calc_drop_prob(__attribute__((unused)) struct rte_timer *tim,
 	if (p_isneg)
 		p = -p;
 
+	p /= 1000;
+
 	p *= (PIE_MAX_PROB << 12) / rte_get_tsc_hz();
 
-	//Drop probability auto-tuning logic as per RFC 8033
+	// Drop probability auto-tuning logic as per RFC 8033
 	if (pie_rt->drop_prob < (PIE_MAX_PROB / 1000000)) {
 		p >>= 11 + PIE_FIX_POINT_BITS + 12;
 	} else if (pie_rt->drop_prob < (PIE_MAX_PROB / 100000)) {
@@ -133,7 +134,7 @@ rte_pie_calc_drop_prob(__attribute__((unused)) struct rte_timer *tim,
 			pie_rt->drop_prob = 0;
 		}
 	} else {
-		//Cap Drop Adjustment
+		// Cap Drop Adjustment
 		if (pie_rt->drop_prob >= PIE_MAX_PROB / 10 && \
 				p > PIE_MAX_PROB / 50 ) {
 			p = PIE_MAX_PROB / 50;
@@ -149,7 +150,7 @@ rte_pie_calc_drop_prob(__attribute__((unused)) struct rte_timer *tim,
 	if (pie_rt->drop_prob < 0) {
 		pie_rt->drop_prob = 0;
 	} else {
-		//Exponentially decay the drop_prob when queue is empty
+		// Exponentially decay the drop_prob when queue is empty
 		if (cur_qdelay/1000 == 0 && old_qdelay/1000 == 0) {
 			pie_rt->drop_prob -= pie_rt->drop_prob >> 6;
 		}
@@ -159,14 +160,12 @@ rte_pie_calc_drop_prob(__attribute__((unused)) struct rte_timer *tim,
 		}
 	}
 
-	//Update burst allowance
+	// Update burst allowance
 	if (pie_rt->burst_allowance < config->t_update) {
 		pie_rt->burst_allowance = 0;
 	} else {
 		pie_rt->burst_allowance -= config->t_update;
 	}
-
-	pie_rt->old_qdelay = cur_qdelay;
 }
 
 

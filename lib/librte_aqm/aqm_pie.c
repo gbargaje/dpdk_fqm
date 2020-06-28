@@ -45,8 +45,8 @@ int aqm_pie_init(struct aqm_pie *pie, struct rte_aqm_pie_params *params)
 
 	config->target_delay    = pie_params->target_delay  * rte_get_timer_hz() / 1000u;
 	config->t_update        = pie_params->t_update * rte_get_timer_hz() / 1000u;
-	config->alpha           = PIE_SCALE*0.125;
-	config->beta            = PIE_SCALE*1.25;
+	config->alpha           = PIE_SCALE * 0.125;
+	config->beta            = PIE_SCALE * 1.25;
 	config->mean_pkt_size   = pie_params->mean_pkt_size;
 	config->max_burst       = pie_params->max_burst * rte_get_timer_hz() / 1000u;
 
@@ -102,13 +102,12 @@ int aqm_pie_enqueue(struct aqm_pie *pie, struct circular_queue *cq,
 
 	if (pie_rt->burst_allowance == 0 && aqm_pie_drop(config, pie_rt, qlen) == PIE_DROP) {
 		rte_pktmbuf_free(pkt);
-		return -1;
+		return 1;
 	}
-
 
 	if (pie_rt->drop_prob == 0 \
 		&& pie_rt->cur_qdelay < config->target_delay>>1 \
-		&& pie_rt->old_qdelay< config->target_delay>>1) {
+		&& pie_rt->old_qdelay < config->target_delay>>1) {
 		pie_rt->burst_allowance = config->max_burst;
 	}
 
@@ -130,10 +129,8 @@ int aqm_pie_dequeue(struct aqm_pie *pie, struct circular_queue *cq,
 	*n_pkts_dropped = 0;
 	*n_bytes_dropped = 0;
 
-	struct rte_pie_rt *pie_rt = &pie->pie_rt;
-
-	pie_rt->cur_qdelay = rte_get_tsc_cycles() - (*pkt)->timestamp;
-
+	pie->pie_rt.old_qdelay = pie->pie_rt.cur_qdelay;
+	pie->pie_rt.cur_qdelay = circular_queue_get_queue_delay(cq);
 	return 0;
 }
 
