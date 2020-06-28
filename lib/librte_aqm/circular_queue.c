@@ -6,18 +6,17 @@
 
 #include <rte_branch_prediction.h>
 #include <rte_mbuf.h>
+#include <rte_ring.h>
 #include <rte_prefetch.h>
 
 #include "circular_queue.h"
 
 struct circular_queue {
-	struct rte_mbuf **queue_base;
+	struct rte_ring *queue_base;
 	uint64_t queue_delay_us;
 	uint32_t length_bytes;
 	uint16_t length_pkts;
 	uint16_t limit;
-	uint16_t head;
-	uint16_t tail;
 };
 
 size_t circular_queue_get_memory_size(void)
@@ -26,15 +25,13 @@ size_t circular_queue_get_memory_size(void)
 }
 
 void circular_queue_init(struct circular_queue *cq,
-			 struct rte_mbuf **queue_base, uint16_t limit)
+			 struct rte_ring *queue_base, uint16_t limit)
 {
 	cq->queue_base = queue_base;
 	cq->queue_delay_us = 0;
 	cq->length_bytes = 0;
 	cq->length_pkts = 0;
 	cq->limit = limit;
-	cq->head = 0;
-	cq->tail = 0;
 
 	return;
 }
@@ -64,27 +61,25 @@ uint8_t circular_queue_is_full(struct circular_queue *cq)
 	return cq->length_pkts == cq->limit;
 }
 
-void circular_queue_prefetch_head(struct circular_queue *cq)
+/*void circular_queue_prefetch_head(struct circular_queue *cq)
 {
 	rte_prefetch0(cq->queue_base + cq->head);
 
 	return;
-}
+}*/
 
-void circular_queue_prefetch_tail(struct circular_queue *cq)
+/*void circular_queue_prefetch_tail(struct circular_queue *cq)
 {
 	rte_prefetch0(cq->queue_base + cq->tail);
 
 	return;
-}
+}*/
 
 int circular_queue_enqueue(struct circular_queue *cq, struct rte_mbuf *pkt)
 {
-	cq->queue_base[cq->tail++] = pkt;
-	pkt->timestamp = rte_rdtsc();
-	if (unlikely(cq->tail == cq->limit))
-		cq->tail = 0;
+	rte_ring_enqueue(cq->queue_base, pkt);
 
+	pkt->timestamp = rte_rdtsc();
 	cq->length_pkts++;
 	cq->length_bytes += pkt->pkt_len;
 
@@ -93,10 +88,7 @@ int circular_queue_enqueue(struct circular_queue *cq, struct rte_mbuf *pkt)
 
 int circular_queue_dequeue(struct circular_queue *cq, struct rte_mbuf **pkt)
 {
-	*pkt = cq->queue_base[cq->head++];
-
-	if (unlikely(cq->head == cq->limit))
-		cq->head = 0;
+	rte_ring_dequeue(cq->queue_base, (void *) pkt);
 
 	cq->length_pkts--;
 	cq->length_bytes -= (*pkt)->pkt_len;

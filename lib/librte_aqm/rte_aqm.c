@@ -66,7 +66,7 @@ size_t rte_aqm_get_memory_size(enum rte_aqm_algorithm algorithm)
 }
 
 int rte_aqm_init(void *memory, struct rte_aqm_params *params,
-		 struct rte_mbuf **queue_base, uint16_t limit)
+		 struct rte_ring *queue_base, uint16_t limit)
 {
 	struct circular_queue *cq = NULL;
 	struct rte_aqm *ra = NULL;
@@ -131,7 +131,7 @@ uint8_t rte_aqm_is_full(void *memory)
 
 	return circular_queue_is_full(cq);
 }
-
+/*
 void rte_aqm_prefetch_head(void *memory)
 {
 	struct circular_queue *cq = NULL;
@@ -153,7 +153,7 @@ void rte_aqm_prefetch_tail(void *memory)
 
 	return;
 }
-
+*/
 int rte_aqm_enqueue(void *memory, struct rte_mbuf *pkt)
 {
 	struct circular_queue *cq = NULL;
