@@ -53,7 +53,7 @@ static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 struct rte_mempool *aqm_pktmbuf_pool = NULL;
 
 static struct rte_eth_dev_tx_buffer *tx_buffer[RTE_MAX_ETHPORTS];
-static struct rte_mbuf **queue;
+static struct rte_ring *queue;
 static void *aqm_memory;
 
 pthread_mutex_t lock;
@@ -644,7 +644,6 @@ static int port_init(uint8_t portid)
 	return 0;
 }
 
-
 static void
 print_def_params(void) {
 
@@ -698,7 +697,6 @@ int main(int argc, char **argv)
 	int ret;
 	uint16_t nb_ports;
 	uint16_t aqm_memory_size;
-	uint16_t queue_memory_size;
 	uint32_t nb_lcores;
 	uint32_t nb_mbufs;
 
@@ -739,10 +737,8 @@ int main(int argc, char **argv)
 
 	aqm_memory_size = rte_aqm_get_memory_size(def_params.aqm_params.algorithm);
 
-	queue_memory_size = def_params.qlen_pkts * sizeof(struct rte_mbuf *);
-
-	queue = (struct rte_mbuf **) rte_zmalloc_socket("qbase", queue_memory_size,
-				RTE_CACHE_LINE_SIZE, rte_eth_dev_socket_id(port_b));
+	queue = rte_ring_create("qbase", def_params.qlen_pkts,
+				rte_socket_id(), RING_F_SP_ENQ | RING_F_SC_DEQ);
 
 	if (queue == NULL)
 		rte_exit(EXIT_FAILURE, "Failed to allocate queue memory\n");
