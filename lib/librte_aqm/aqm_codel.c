@@ -64,9 +64,10 @@ int aqm_codel_init(struct aqm_codel *codel, struct rte_aqm_codel_params *params)
 	if (codel_params->interval <= 0)
 		return -3;
 
-	uint64_t cycles 		= rte_get_timer_hz();
-	config->target 			= codel_params->target * cycles / 1000u;	//5000ul = 5ms in microseconds
-	config->interval		= codel_params->interval * cycles / 1000u;	//10000ul = 100ms in microseconds
+	config->target 			= (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
+				codel_params->target * 1000u;
+	config->interval		= (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S *
+				codel_params->interval * 1000u;
 
 	if (codel_rt == NULL)
 		return -1;
@@ -119,8 +120,7 @@ aqm_codel_drop(struct rte_codel_rt *codel,
 	if (qlen == 0) {
 		codel->first_above_time = 0;	//Since queue is empty, there is nothing to dequeue.
 	}
-	uint64_t now = rte_get_tsc_cycles();
-	codel->sojourn_time = (now - timestamp);
+
 	uint32_t delta;
 	codel->ok_to_drop = CODEL_DEQUEUE;
 
@@ -128,8 +128,8 @@ aqm_codel_drop(struct rte_codel_rt *codel,
 		codel->first_above_time = 0;	//Since sojourn time is less than TARGET, stay down for atleast INTERVAL
 	} else {
 		if (codel->first_above_time == 0) {
-			codel->first_above_time = now + config->interval;
-		} else if (now >= codel->first_above_time) {
+			codel->first_above_time = rte_rdtsc() + config->interval;
+		} else if (rte_rdtsc() >= codel->first_above_time) {
 			codel->ok_to_drop = CODEL_DROP;
 		}
 	}
@@ -138,7 +138,7 @@ aqm_codel_drop(struct rte_codel_rt *codel,
 		if (codel->ok_to_drop == CODEL_DEQUEUE) {
 			codel->dropping_state = false;	// sojourn time below TARGET - leave drop state
 		}
-		while (now >= codel->drop_next && codel->dropping_state) {
+		while (rte_rdtsc() >= codel->drop_next && codel->dropping_state) {
 			++codel->count;
 			codel_newton_step(codel);
 			if (!codel->ok_to_drop) {
@@ -151,13 +151,13 @@ aqm_codel_drop(struct rte_codel_rt *codel,
 		codel->dropping_state = true;
 		delta = codel->count - codel->lastcount;
 		codel->count = 1;
-		if ((delta > 1) && (now - codel->drop_next < 16*config->interval)) {
+		if ((delta > 1) && (rte_rdtsc() - codel->drop_next < 16*config->interval)) {
 			codel->count = delta;
 			codel_newton_step(codel);
 		} else {
 			codel->rec_inv_sqrt =  ~0U >> REC_INV_SQRT_SHIFT;
 		}
-		codel->drop_next = codel_control_law(now, config->interval, codel->rec_inv_sqrt);
+		codel->drop_next = codel_control_law(rte_rdtsc(), config->interval, codel->rec_inv_sqrt);
 		codel->lastcount = codel->count;
 	}
 	return codel->ok_to_drop;
@@ -170,6 +170,8 @@ int aqm_codel_dequeue(struct aqm_codel *codel, struct circular_queue *cq,
 	int ret = 0;
 	uint16_t qlen = circular_queue_get_length_pkts(cq);
 	ret = circular_queue_dequeue(cq, pkt);
+
+	codel->codel_rt.sojourn_time = circular_queue_get_queue_delay(cq);
 
 	if (unlikely(ret)) {
 		RTE_LOG(ERR, AQM, "%s: dequeue failure\n", __func__);
