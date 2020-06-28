@@ -54,13 +54,7 @@ uint8_t rte_aqm_is_empty(void *memory);
 
 __rte_experimental
 uint8_t rte_aqm_is_full(void *memory);
-/*
-__rte_experimental
-void rte_aqm_prefetch_head(void *memory);
 
-__rte_experimental
-void rte_aqm_prefetch_tail(void *memory);
-*/
 __rte_experimental
 int rte_aqm_enqueue(void *memory, struct rte_mbuf *pkt);
 

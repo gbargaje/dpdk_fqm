@@ -131,29 +131,7 @@ uint8_t rte_aqm_is_full(void *memory)
 
 	return circular_queue_is_full(cq);
 }
-/*
-void rte_aqm_prefetch_head(void *memory)
-{
-	struct circular_queue *cq = NULL;
 
-	cq = (void *)((uint8_t *)memory + sizeof(struct rte_aqm));
-
-	circular_queue_prefetch_head(cq);
-
-	return;
-}
-
-void rte_aqm_prefetch_tail(void *memory)
-{
-	struct circular_queue *cq = NULL;
-
-	cq = (void *)((uint8_t *)memory + sizeof(struct rte_aqm));
-
-	circular_queue_prefetch_tail(cq);
-
-	return;
-}
-*/
 int rte_aqm_enqueue(void *memory, struct rte_mbuf *pkt)
 {
 	struct circular_queue *cq = NULL;
