@@ -35,16 +35,19 @@ codel_newton_step(struct rte_codel_rt *codel);
  *
  * @return Next drop time of the packet
  */
-static u_int64_t 
-codel_control_law(u_int64_t t, 
-	u_int64_t interval, 
-	u_int32_t rec_inv_sqrt);
+static uint64_t
+codel_control_law(uint64_t t,
+	uint64_t interval,
+	uint32_t rec_inv_sqrt);
 
-int
-aqm_codel_drop(struct rte_codel_rt *codel, 
-	struct rte_codel_config *config, 
-	uint32_t qlen, 
-	uint64_t timestamp);
+
+static int
+codel_should_drop(struct rte_codel_rt *codel,
+	struct rte_codel_config *config,
+	struct rte_mbuf **pkt,
+	struct circular_queue *cq,
+	uint64_t now);
+
 
 size_t aqm_codel_get_memory_size(void)
 {
@@ -76,7 +79,6 @@ int aqm_codel_init(struct aqm_codel *codel, struct rte_aqm_codel_params *params)
 	codel_rt->drop_next 					= 0;
 	codel_rt->count 						= 0;
 	codel_rt->lastcount 					= 0;
-	codel_rt->ok_to_drop 					= CODEL_DEQUEUE;
 	codel_rt->dropping_state 				= false;
 
 	return 0;
@@ -88,108 +90,152 @@ int aqm_codel_enqueue(struct aqm_codel *codel, struct circular_queue *cq,
 	return circular_queue_enqueue(cq, pkt);
 }
 
-static void 
+static void
 codel_newton_step(struct rte_codel_rt *codel)
 {
 	uint32_t invsqrt, invsqrt2;
 	uint64_t val;
 
-	invsqrt = ((u_int32_t)codel->rec_inv_sqrt) << REC_INV_SQRT_SHIFT;
-	invsqrt2 = ((u_int64_t)invsqrt * invsqrt) >> 32;
-	val = (3LL << 32) - ((u_int64_t)codel->count * invsqrt2);
+	invsqrt = ((uint32_t)codel->rec_inv_sqrt) << REC_INV_SQRT_SHIFT;
+	invsqrt2 = ((uint64_t)invsqrt * invsqrt) >> 32;
+	val = (3LL << 32) - ((uint64_t)codel->count * invsqrt2);
 	val >>= 2; /* avoid overflow in following multiply */
 	val = (val * invsqrt) >> (32 - 2 + 1);
 	codel->rec_inv_sqrt = val >> REC_INV_SQRT_SHIFT;
 }
 
-static u_int64_t
-codel_control_law(u_int64_t t, 
-	u_int64_t interval, 
-	u_int32_t rec_inv_sqrt)
+static uint64_t
+codel_control_law(uint64_t t,
+	uint64_t interval,
+	uint32_t rec_inv_sqrt)
 {
-	return (t + (u_int32_t)(((u_int64_t)interval *
+	return (t + (uint32_t)(((uint64_t)interval *
 		(rec_inv_sqrt << REC_INV_SQRT_SHIFT)) >> 32));
 }
 
-int
-aqm_codel_drop(struct rte_codel_rt *codel, 
-	struct rte_codel_config *config, 
-	uint32_t qlen, 
-	uint64_t timestamp)
+
+static int
+codel_should_drop(struct rte_codel_rt *codel,
+	struct rte_codel_config *config,
+	struct rte_mbuf **pkt,
+	struct circular_queue *cq,
+	uint64_t now)
 {
-	if (qlen == 0) {
-		codel->first_above_time = 0;	//Since queue is empty, there is nothing to dequeue.
+
+	int ret = circular_queue_dequeue(cq, pkt);
+	if (unlikely(ret)) {
+		RTE_LOG(ERR, AQM, "%s: dequeue failure\n", __func__);
+		return -1;
 	}
 
-	uint32_t delta;
-	codel->ok_to_drop = CODEL_DEQUEUE;
+	if(pkt == NULL)	{
+		codel->first_above_time = 0;
+		return CODEL_DEQUEUE;
+	}
 
-	if ((codel->sojourn_time < config->target) || (qlen <= MAX_PACKET)) {
+	codel->sojourn_time = circular_queue_get_queue_delay(cq) * rte_get_timer_hz()/(1000*1000u);// Sojourn time in units of cpu cycles
+
+	if ((codel->sojourn_time < config->target) || (circular_queue_get_length_bytes(cq) <= MAX_PACKET)) {
 		codel->first_above_time = 0;	//Since sojourn time is less than TARGET, stay down for atleast INTERVAL
-	} else {
-		if (codel->first_above_time == 0) {
-			codel->first_above_time = rte_rdtsc() + config->interval;
-		} else if (rte_rdtsc() >= codel->first_above_time) {
-			codel->ok_to_drop = CODEL_DROP;
-		}
+		return CODEL_DEQUEUE;
+	}
+	if (codel->first_above_time == 0) {
+		/*  Just went above from below. If we stay above
+		 * for at least interval we'll say it's ok to drop
+		*/
+		codel->first_above_time = now + config->interval;
+		return CODEL_DEQUEUE;
 	}
 
-	if (codel->dropping_state) {
-		if (codel->ok_to_drop == CODEL_DEQUEUE) {
-			codel->dropping_state = false;	// sojourn time below TARGET - leave drop state
-		}
-		while (rte_rdtsc() >= codel->drop_next && codel->dropping_state) {
-			++codel->count;
-			codel_newton_step(codel);
-			if (!codel->ok_to_drop) {
-				codel->dropping_state = false;
-			} else {
-				codel->drop_next = codel_control_law(codel->drop_next, config->interval, codel->rec_inv_sqrt);
-			}
-		}
-	} else if (codel->ok_to_drop == CODEL_DROP) {
-		codel->dropping_state = true;
-		delta = codel->count - codel->lastcount;
-		codel->count = 1;
-		if ((delta > 1) && (rte_rdtsc() - codel->drop_next < 16*config->interval)) {
-			codel->count = delta;
-			codel_newton_step(codel);
-		} else {
-			codel->rec_inv_sqrt =  ~0U >> REC_INV_SQRT_SHIFT;
-		}
-		codel->drop_next = codel_control_law(rte_rdtsc(), config->interval, codel->rec_inv_sqrt);
-		codel->lastcount = codel->count;
-	}
-	return codel->ok_to_drop;
+ 	if (now > codel->first_above_time)
+		return CODEL_DROP;
+
+	return CODEL_DEQUEUE;
 }
 
 int aqm_codel_dequeue(struct aqm_codel *codel, struct circular_queue *cq,
 			  struct rte_mbuf **pkt, uint16_t *n_pkts_dropped,
 			  uint32_t *n_bytes_dropped)
 {
-	int ret = 0;
-	uint16_t qlen = circular_queue_get_length_pkts(cq);
-	ret = circular_queue_dequeue(cq, pkt);
+	uint16_t pkts_dropped = 0,bytes_dropped = 0;
+	int drop;
 
-	codel->codel_rt.sojourn_time = circular_queue_get_queue_delay(cq);
-
-	if (unlikely(ret)) {
-		RTE_LOG(ERR, AQM, "%s: dequeue failure\n", __func__);
-		return -1;
-	}
-	*n_pkts_dropped = 0;
-	*n_bytes_dropped = 0;
-
-	if (unlikely(aqm_codel_drop(&codel->codel_rt,
-				&codel->codel_config,
-				qlen,
-				(*pkt)->timestamp))) {
-		*n_pkts_dropped = 1;
-		*n_bytes_dropped = (*pkt)->pkt_len;
+	if (circular_queue_get_length_pkts(cq) == 0) {
+		// If the queue is empty
+		codel->codel_rt.dropping_state = false;
+		pkt = NULL;
 		return 1;
 	}
 
+	uint64_t now = rte_rdtsc();
+	//Get the drop decision
+	drop = codel_should_drop(&codel->codel_rt,&codel->codel_config,pkt,cq,now);
+	if(unlikely(drop == -1))
+		return -1;
+
+	if (codel->codel_rt.dropping_state) {
+
+		if (drop == CODEL_DEQUEUE)
+			codel->codel_rt.dropping_state = false;	// sojourn time below TARGET - leave drop state
+		else if(now >= codel->codel_rt.drop_next) {
+		/* It's time for the next drop. Drop the current
+			 * packet and dequeue the next. The dequeue might
+			 * take us out of dropping state.
+			 * If not, schedule the next drop.
+			 * A large backlog might result in drop rates so high
+			 * that the next drop should happen now,
+			 * hence the while loop.
+			 */
+			while (now >= codel->codel_rt.drop_next && codel->codel_rt.dropping_state) {
+		    codel->codel_rt.count++;
+		    codel_newton_step(&codel->codel_rt);
+
+				// DROP PACKET
+				pkts_dropped ++;
+		    bytes_dropped += (*pkt)->pkt_len;
+				rte_pktmbuf_free(*pkt);
+
+				drop = codel_should_drop(&codel->codel_rt,&codel->codel_config,pkt,cq,now);
+				if(unlikely(drop == -1))
+					return -1;
+
+				if (drop == CODEL_DEQUEUE)
+	              codel->codel_rt.dropping_state = false;
+	      else
+	              codel->codel_rt.drop_next = codel_control_law(codel->codel_rt.drop_next, codel->codel_config.interval, codel->codel_rt.rec_inv_sqrt);
+
+      }
+		}
+	} else if (drop == CODEL_DROP) {
+		// DROP PACKET
+    pkts_dropped ++;
+  	bytes_dropped += (*pkt)->pkt_len;
+		rte_pktmbuf_free(*pkt);
+
+		drop = codel_should_drop(&codel->codel_rt,&codel->codel_config,pkt,cq,now);
+		if(unlikely(drop == -1))
+			return -1;
+		codel->codel_rt.dropping_state = true;
+
+		if (now - codel->codel_rt.drop_next < 16*codel->codel_config.interval) {
+			codel->codel_rt.count = (codel->codel_rt.count - codel->codel_rt.lastcount) | 1;
+			codel_newton_step(&codel->codel_rt);
+		} else {
+			codel->codel_rt.count = 1;
+			codel->codel_rt.rec_inv_sqrt =  ~0U >> REC_INV_SQRT_SHIFT;
+		}
+
+		codel->codel_rt.lastcount = codel->codel_rt.count;
+		codel->codel_rt.drop_next = codel_control_law(now, codel->codel_config.interval, codel->codel_rt.rec_inv_sqrt);
+	}
+
+	*n_pkts_dropped = pkts_dropped;
+	*n_bytes_dropped = bytes_dropped;
+
+	if(unlikely(pkts_dropped > 0))
+		return 1;
 	return 0;
+
 }
 
 int aqm_codel_get_stats(struct aqm_codel *codel,

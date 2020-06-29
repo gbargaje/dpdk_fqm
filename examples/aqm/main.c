@@ -163,12 +163,12 @@ static void port_stat(uint8_t portid)
 	struct rte_aqm_stats *aqm_stats = &port_statistics[portid].aqm_stats;
 
 	rte_aqm_get_stats(aqm_memory, aqm_stats);
-	printf("%lu %lu %lu %lu\n",
+	printf("%lu %lu %lu %lu %u\n",
 		aqm_stats->bytes_dequeued, aqm_stats->queue_delay,
-		aqm_stats->pkts_dropped_enqueue, aqm_stats->pkts_dropped_dequeue);
-	fprintf(fp, "%lu %lu %lu %lu\n",
+		aqm_stats->pkts_dropped_enqueue, aqm_stats->pkts_dropped_dequeue,aqm_stats->length_pkts);
+	fprintf(fp, "%lu %lu %lu %lu %u\n",
 		aqm_stats->bytes_dequeued, aqm_stats->queue_delay,
-		aqm_stats->pkts_dropped_enqueue, aqm_stats->pkts_dropped_dequeue);
+		aqm_stats->pkts_dropped_enqueue, aqm_stats->pkts_dropped_dequeue,aqm_stats->length_pkts);
 
 	fclose(fp);
 

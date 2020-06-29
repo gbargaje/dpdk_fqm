@@ -23,17 +23,16 @@ extern "C" {
 
 #define CODEL_DROP 				1	/**< Return status variable: DROP drop/discard the packet */
 #define CODEL_DEQUEUE 			0	/**< Return status variable: DEQUEUE dequeque the packet from queue */
-#define MAX_PACKET 				512	/**< Maximum packet size in bytes (SHOULD use interface MTU) */
-#define	REC_INV_SQRT_BITS 		(8 * sizeof(u_int16_t))		/**< sizeof_in_bits (rec_inv_sqrt) */
+#define MAX_PACKET 				512	/**< Maximum packet size in bytes (SHOULD use interface MTU) - Based on RFC */
+#define	REC_INV_SQRT_BITS 		(8 * sizeof(uint16_t))		/**< sizeof_in_bits (rec_inv_sqrt) */
 #define	REC_INV_SQRT_SHIFT 		(32 - REC_INV_SQRT_BITS)	/**< Needed shift to get a Q0.32 number from rec_inv_sqrt */
 
-/**	
+/**
  * CoDel runtime data
  */
 struct rte_codel_rt {
 	uint32_t	count;			/**< Number of packets dropped since last dropping state */
 	uint32_t	lastcount;		/**< Count when going into dropping state */
-	int 		ok_to_drop;		/**< Flag to check whether to drop or not */
 	bool 		dropping_state;		/**< Set true if CoDel is in dropping state */
 	uint16_t 	rec_inv_sqrt;   	/**< For control_law: reciprocal value of sqrt(count) >> 1 */
 	uint64_t	first_above_time;	/**< Time when sojourn time goes continuously above target */
