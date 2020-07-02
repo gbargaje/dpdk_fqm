@@ -143,15 +143,15 @@ int rte_aqm_enqueue(void *memory, struct rte_mbuf *pkt)
 	cq = (struct circular_queue *)memory;
 	memory = (uint8_t *)memory + circular_queue_get_memory_size();
 
-	if (unlikely(circular_queue_is_full(cq))) {
-		ra->bytes_dropped_overflow += pkt->pkt_len;
-		ra->pkts_dropped_overflow++;
-		rte_pktmbuf_free(pkt);
-		return 1;
-	}
-
 	switch (ra->algorithm) {
 		case RTE_AQM_FIFO:
+			if (unlikely(circular_queue_is_full(cq))) {
+				ra->bytes_dropped_overflow += pkt->pkt_len;
+				ra->pkts_dropped_overflow++;
+				rte_pktmbuf_free(pkt);
+				return 1;
+			}
+
 			ret = circular_queue_enqueue(cq, pkt);
 			break;
 
@@ -206,13 +206,13 @@ int rte_aqm_dequeue(void *memory, struct rte_mbuf **pkt,
 	*n_pkts_dropped = 0;
 	*n_bytes_dropped = 0;
 
-	if (circular_queue_is_empty(cq)) {
-		pkt = NULL;
-		return 1;
-	}
-
 	switch (ra->algorithm) {
 		case RTE_AQM_FIFO:
+			if (circular_queue_is_empty(cq)) {
+				pkt = NULL;
+				return 1;
+			}
+
 			ret = circular_queue_dequeue(cq, pkt);
 			break;
 
