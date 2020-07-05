@@ -104,11 +104,9 @@ rte_pie_calc_drop_prob(__attribute__((unused)) struct rte_timer *tim,
 
 	if (p_isneg)
 		p = -p;
-
-	p /= 1000;
-
-	p *= (PIE_MAX_PROB << 12) / rte_get_tsc_hz();
-
+		
+	
+	p *= (PIE_MAX_PROB << 12) / US_PER_S;
 	// Drop probability auto-tuning logic as per RFC 8033
 	if (pie_rt->drop_prob < (PIE_MAX_PROB / 1000000)) {
 		p >>= 11 + PIE_FIX_POINT_BITS + 12;
@@ -151,7 +149,7 @@ rte_pie_calc_drop_prob(__attribute__((unused)) struct rte_timer *tim,
 		pie_rt->drop_prob = 0;
 	} else {
 		// Exponentially decay the drop_prob when queue is empty
-		if (cur_qdelay/1000 == 0 && old_qdelay/1000 == 0) {
+		if (cur_qdelay == 0 && old_qdelay == 0) {
 			pie_rt->drop_prob -= pie_rt->drop_prob >> 6;
 		}
 
@@ -159,6 +157,8 @@ rte_pie_calc_drop_prob(__attribute__((unused)) struct rte_timer *tim,
 			pie_rt->drop_prob = PIE_MAX_PROB;
 		}
 	}
+
+	pie_rt->old_qdelay = cur_qdelay;
 
 	// Update burst allowance
 	if (pie_rt->burst_allowance < config->t_update) {

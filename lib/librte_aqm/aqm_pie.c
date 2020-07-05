@@ -26,6 +26,7 @@ int aqm_pie_init(struct aqm_pie *pie, struct rte_aqm_pie_params *params)
 {
 	struct rte_pie_params *pie_params = &params->params;
 	struct rte_pie_config *config = &pie->pie_config;
+	struct rte_pie_rt *pie_rt = &pie->pie_rt;
 
 	if (config == NULL) {
 		return -1;
@@ -43,18 +44,25 @@ int aqm_pie_init(struct aqm_pie *pie, struct rte_aqm_pie_params *params)
 		pie_params->mean_pkt_size = 2;
 	}
 
-	config->target_delay    = pie_params->target_delay  * rte_get_timer_hz() / 1000u;
-	config->t_update        = pie_params->t_update * rte_get_timer_hz() / 1000u;
+	config->target_delay    = pie_params->target_delay * 1000u;
+	config->t_update        = pie_params->t_update * 1000u;
 	config->alpha           = PIE_SCALE * 0.125;
 	config->beta            = PIE_SCALE * 1.25;
 	config->mean_pkt_size   = pie_params->mean_pkt_size;
-	config->max_burst       = pie_params->max_burst * rte_get_timer_hz() / 1000u;
+	config->max_burst 	= pie_params->max_burst * 1000u;
 
+	pie_rt->drop_prob = 0;
+	pie_rt->burst_allowance = config->max_burst;
+	pie_rt->old_qdelay = 0;
+	pie_rt->cur_qdelay = 0;
+	pie_rt->accu_prob = 0;
+
+	uint64_t t = (rte_get_tsc_hz()+US_PER_S-1)/US_PER_S * pie->pie_config.t_update;
 	unsigned int lcore_id = rte_lcore_id();
 
 	rte_timer_subsystem_init();
 
-	rte_timer_reset(&pie->pie_timer, pie->pie_config.t_update, PERIODICAL,
+	rte_timer_reset(&pie->pie_timer, t, PERIODICAL,
 		lcore_id, rte_pie_calc_drop_prob, (void *) pie);
 
 	return 0;
@@ -74,7 +82,6 @@ aqm_pie_drop(struct rte_pie_config *config,
 	if(pie_rt->drop_prob == 0) {
 		pie_rt->accu_prob = 0;
 	}
-
 	pie_rt->accu_prob += pie_rt->drop_prob;
 
 	if(pie_rt->accu_prob < (uint64_t) PIE_MAX_PROB * 17 / 20) {
@@ -83,13 +90,15 @@ aqm_pie_drop(struct rte_pie_config *config,
 
 	if(pie_rt->accu_prob >= (uint64_t) PIE_MAX_PROB * 17 / 2) {
 		return PIE_DROP;
-	}
+	}	
 
 	int64_t random = rte_rand() % PIE_MAX_PROB;
+
 	if (random < pie_rt->drop_prob) {
 		pie_rt->accu_prob = 0;
 		return PIE_DROP;
 	}
+	
 	return PIE_ENQUEUE;
 }
 
@@ -129,7 +138,6 @@ int aqm_pie_dequeue(struct aqm_pie *pie, struct circular_queue *cq,
 	*n_pkts_dropped = 0;
 	*n_bytes_dropped = 0;
 
-	pie->pie_rt.old_qdelay = pie->pie_rt.cur_qdelay;
 	pie->pie_rt.cur_qdelay = circular_queue_get_queue_delay(cq);
 	return 0;
 }
