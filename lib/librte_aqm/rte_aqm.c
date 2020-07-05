@@ -164,6 +164,15 @@ int rte_aqm_enqueue(void *memory, struct rte_mbuf *pkt)
 			break;
 
 		case RTE_AQM_PIE:
+			if (unlikely(circular_queue_is_full(cq))) {
+				ra->bytes_dropped_overflow += pkt->pkt_len;
+				ra->pkts_dropped_overflow++;
+				rte_pktmbuf_free(pkt);
+				struct aqm_pie *pie = (struct aqm_pie *)memory;
+				struct rte_pie_rt *pie_rt = &pie->pie_rt;
+				pie_rt->accu_prob = 0;
+				return 1;
+			}
 			ret = aqm_pie_enqueue(memory, cq, pkt);
 			break;
 
@@ -227,6 +236,11 @@ int rte_aqm_dequeue(void *memory, struct rte_mbuf **pkt,
 			break;
 
 		case RTE_AQM_PIE:
+			if (circular_queue_is_empty(cq)) {
+				pkt = NULL;
+				return 1;
+			}
+
 			ret = aqm_pie_dequeue(memory, cq, pkt, n_pkts_dropped,
 					      n_bytes_dropped);
 			break;
