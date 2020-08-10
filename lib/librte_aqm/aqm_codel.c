@@ -208,7 +208,7 @@ int aqm_codel_dequeue(struct aqm_codel *codel, struct circular_queue *cq,
 		}
 	} else if (drop == CODEL_DROP) {
 		// DROP PACKET
-    	pkts_dropped ++;
+		pkts_dropped ++;
   		bytes_dropped += (*pkt)->pkt_len;
 		rte_pktmbuf_free(*pkt);
 
