@@ -21,9 +21,9 @@
 extern "C" {
 #endif
 
-#define CODEL_DROP 				1	/**< Return status variable: DROP drop/discard the packet */
+#define CODEL_DROP				1	/**< Return status variable: DROP drop/discard the packet */
 #define CODEL_DEQUEUE 			0	/**< Return status variable: DEQUEUE dequeque the packet from queue */
-#define MAX_PACKET 				512	/**< Maximum packet size in bytes (SHOULD use interface MTU) - Based on RFC */
+#define MAX_PACKET 			512	/**< Maximum packet size in bytes (SHOULD use interface MTU) - Based on RFC */
 #define	REC_INV_SQRT_BITS 		(8 * sizeof(uint16_t))		/**< sizeof_in_bits (rec_inv_sqrt) */
 #define	REC_INV_SQRT_SHIFT 		(32 - REC_INV_SQRT_BITS)	/**< Needed shift to get a Q0.32 number from rec_inv_sqrt */
 
@@ -56,14 +56,14 @@ struct aqm_codel {
 size_t aqm_codel_get_memory_size(void);
 
 int aqm_codel_init(struct aqm_codel *codel,
-		   struct rte_aqm_codel_params *params);
+		struct rte_aqm_codel_params *params);
 
 int aqm_codel_enqueue(struct aqm_codel *codel, struct circular_queue *cq,
-			  struct rte_mbuf *pkt);
+			struct rte_mbuf *pkt);
 
 int aqm_codel_dequeue(struct aqm_codel *codel, struct circular_queue *cq,
-			  struct rte_mbuf **pkt, uint16_t *n_pkts_dropped,
-			  uint32_t *n_bytes_dropped);
+			struct rte_mbuf **pkt, uint16_t *n_pkts_dropped,
+			uint32_t *n_bytes_dropped);
 
 int aqm_codel_get_stats(struct aqm_codel *codel,
 			struct rte_aqm_codel_stats *stats);

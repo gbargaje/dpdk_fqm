@@ -77,7 +77,7 @@ int aqm_codel_init(struct aqm_codel *codel, struct rte_aqm_codel_params *params)
 
 	codel_rt->first_above_time 				= 0;
 	codel_rt->drop_next 					= 0;
-	codel_rt->count 						= 0;
+	codel_rt->count						= 0;
 	codel_rt->lastcount 					= 0;
 	codel_rt->dropping_state 				= false;
 
@@ -178,7 +178,7 @@ int aqm_codel_dequeue(struct aqm_codel *codel, struct circular_queue *cq,
 		if (drop == CODEL_DEQUEUE)
 			codel->codel_rt.dropping_state = false;	// sojourn time below TARGET - leave drop state
 		else if(now >= codel->codel_rt.drop_next) {
-		/* It's time for the next drop. Drop the current
+			/* It's time for the next drop. Drop the current
 			 * packet and dequeue the next. The dequeue might
 			 * take us out of dropping state.
 			 * If not, schedule the next drop.
@@ -187,12 +187,12 @@ int aqm_codel_dequeue(struct aqm_codel *codel, struct circular_queue *cq,
 			 * hence the while loop.
 			 */
 			while (now >= codel->codel_rt.drop_next && codel->codel_rt.dropping_state) {
-		    codel->codel_rt.count++;
-		    codel_newton_step(&codel->codel_rt);
+		    	codel->codel_rt.count++;
+		    	codel_newton_step(&codel->codel_rt);
 
 				// DROP PACKET
 				pkts_dropped ++;
-		    bytes_dropped += (*pkt)->pkt_len;
+		    	bytes_dropped += (*pkt)->pkt_len;
 				rte_pktmbuf_free(*pkt);
 
 				drop = codel_should_drop(&codel->codel_rt,&codel->codel_config,pkt,cq,now);
@@ -201,15 +201,15 @@ int aqm_codel_dequeue(struct aqm_codel *codel, struct circular_queue *cq,
 
 				if (drop == CODEL_DEQUEUE)
 	              codel->codel_rt.dropping_state = false;
-	      else
+	      		else
 	              codel->codel_rt.drop_next = codel_control_law(codel->codel_rt.drop_next, codel->codel_config.interval, codel->codel_rt.rec_inv_sqrt);
 
-      }
+      		}
 		}
 	} else if (drop == CODEL_DROP) {
 		// DROP PACKET
-    pkts_dropped ++;
-  	bytes_dropped += (*pkt)->pkt_len;
+    	pkts_dropped ++;
+  		bytes_dropped += (*pkt)->pkt_len;
 		rte_pktmbuf_free(*pkt);
 
 		drop = codel_should_drop(&codel->codel_rt,&codel->codel_config,pkt,cq,now);
