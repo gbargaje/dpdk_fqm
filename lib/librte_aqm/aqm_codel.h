@@ -56,7 +56,7 @@ struct aqm_codel {
 size_t aqm_codel_get_memory_size(void);
 
 int aqm_codel_init(struct aqm_codel *codel,
-		struct rte_aqm_codel_params *params);
+		   struct rte_aqm_codel_params *params);
 
 int aqm_codel_enqueue(struct aqm_codel *codel, struct circular_queue *cq,
 			struct rte_mbuf *pkt);
